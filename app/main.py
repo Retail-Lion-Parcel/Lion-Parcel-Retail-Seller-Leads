@@ -97,7 +97,10 @@ class Store:
 
     def routes(self) -> list[dict]:
         if self.demo:
-            return []
+            return [
+                {"id": f"demo-route-{lead['id']}", "lead_id": lead["id"], "sales_id": lead.get("sales_id"), "scheduled_date": lead.get("visit_date"), "visit_status": "Scheduled", "notes": "", "leads": lead}
+                for lead in DEMO_LEADS if lead.get("sales_id")
+            ]
         return self._request("GET", "visit_routes", params={"select": "*,leads(*),users!visit_routes_sales_id_fkey(id,username,full_name)", "order": "scheduled_date.desc"})
 
     def create_lead(self, data: dict) -> dict:
@@ -213,22 +216,22 @@ async def logout(request: Request):
 async def leads_page(request: Request, search: str = ""):
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
-    return render(request, "leads.html", title="Leads", leads=store.leads(search), search=search)
+    return render(request, "data_entry/list.html", title="Daftar Leads", leads=store.leads(search), search=search)
 
 
 @app.get("/leads/new", response_class=HTMLResponse)
 async def lead_form(request: Request):
     if not can(current_user(request), "data_entry", "admin"):
         return RedirectResponse("/leads", status_code=303)
-    return render(request, "lead_form.html", title="Tambah Lead", form={})
+    return render(request, "data_entry/form.html", title="Tambah Lead", couriers=EXPEDITIONS, success=None)
 
 
 @app.post("/leads")
-async def create_lead(request: Request, timestamp_visit: str = Form(...), store_name: str = Form(...), block: str = Form(...), floor: str = Form(...), los: str = Form(""), pic_name: str = Form(...), pic_title: str = Form(""), phone: str = Form(...), domestic: str = Form("Tidak"), international: str = Form("Tidak"), expedition: str = Form(...), top_country: str = Form(""), top_city: str = Form(""), tonnage: float = Form(0), tonnage_period: str = Form("bulan")):
+async def create_lead(request: Request, visit_timestamp: str = Form(""), timestamp_visit: str = Form(""), store_name: str = Form(...), block: str = Form(...), floor: str = Form(...), los: str = Form(""), pic_name: str = Form(...), pic_position: str = Form(""), pic_title: str = Form(""), phone_number: str = Form(""), phone: str = Form(""), data_entry_pic: str = Form(""), shipment_type: str = Form(""), current_courier: str = Form(""), domestic: str = Form("Tidak"), international: str = Form("Tidak"), expedition: str = Form(""), top_country: str = Form(""), top_city: str = Form(""), tonnage_potential_kg: float = Form(0), tonnage: float = Form(0), tonnage_period: str = Form("Bulan")):
     user = current_user(request)
     if not can(user, "data_entry", "admin"):
         return RedirectResponse("/leads", status_code=303)
-    store.create_lead({"timestamp_visit": timestamp_visit, "store_name": store_name, "block": block, "floor": floor, "los": los, "pic_name": pic_name, "pic_title": pic_title, "phone": phone, "domestic": domestic, "international": international, "expedition": expedition, "top_country": top_country, "top_city": top_city, "tonnage": tonnage, "tonnage_period": tonnage_period, "entry_user_id": user["id"]})
+    store.create_lead({"visit_timestamp": visit_timestamp or timestamp_visit, "store_name": store_name, "block": block.upper(), "floor": floor.upper(), "los": los.upper() or None, "pic_name": pic_name, "pic_position": pic_position or pic_title, "phone_number": phone_number or phone, "data_entry_pic": data_entry_pic or user.get("name", ""), "shipment_type": shipment_type or ("Keduanya" if domestic == "Ya" and international == "Ya" else "Domestik"), "current_courier": current_courier or expedition, "top_country": top_country, "top_city": top_city, "tonnage_potential_kg": tonnage_potential_kg or tonnage, "tonnage_period": tonnage_period, "created_by": user["id"]})
     return RedirectResponse("/leads?created=1", status_code=303)
 
 
@@ -241,7 +244,39 @@ async def routing_page(request: Request):
     for row in rows:
         key = f"Blok {row.get('block') or '-'} / Lantai {row.get('floor') or '-'}"
         grouped.setdefault(key, []).append(row)
-    return render(request, "routing.html", title="Routing Visit", groups=grouped, leads=rows, sales=[item for item in store.users() if item.get("role") == "sales"])
+    selected_id = request.query_params.get("selected_lead_id")
+    selected = next((row for row in rows if row.get("id") == selected_id), None)
+    recommendations = [row for row in rows if selected and row.get("id") != selected_id and row.get("block") == selected.get("block") and row.get("floor") == selected.get("floor")]
+    return render(request, "router/routing.html", title="Routing Visit", groups=grouped, leads=rows, sales_users=[item for item in store.users() if item.get("role") == "sales"], selected_lead=selected, recommendations=recommendations, routes=store.routes())
+
+
+@app.get("/sales/schedule", response_class=HTMLResponse)
+async def sales_schedule(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse("/login", status_code=303)
+    routes = store.routes()
+    if user.get("role") == "sales":
+        routes = [route for route in routes if route.get("sales_id") == user.get("id")]
+    return render(request, "sales/schedule.html", title="Jadwal Sales", routes=routes)
+
+
+@app.post("/sales/update-status")
+async def update_visit_status(request: Request, route_id: str = Form(...), visit_status: str = Form(...), notes: str = Form("")):
+    if not current_user(request):
+        return RedirectResponse("/login", status_code=303)
+    lead_id = route_id.removeprefix("demo-route-")
+    store.update_lead(lead_id, {"visit_status": visit_status, "visit_notes": notes})
+    return RedirectResponse("/sales/schedule", status_code=303)
+
+
+@app.post("/routing/assign")
+async def assign_route(request: Request, lead_id: str = Form(...), sales_id: str = Form(...), scheduled_date: str = Form(...), notes: str = Form("")):
+    user = current_user(request)
+    if not can(user, "router", "admin"):
+        return RedirectResponse("/", status_code=303)
+    store.assign_route(lead_id, sales_id, user["id"], scheduled_date, notes)
+    return RedirectResponse("/routing?success=1", status_code=303)
 
 
 @app.post("/routing/{lead_id}")
@@ -256,7 +291,7 @@ async def update_routing(request: Request, lead_id: str, visit_date: str = Form(
 async def users_page(request: Request):
     if not can(current_user(request), "admin"):
         return RedirectResponse("/", status_code=303)
-    return render(request, "users.html", title="Pengguna", users=store.users())
+    return render(request, "admin/users.html", title="Pengguna", users_list=store.users())
 
 
 @app.post("/users")
@@ -268,6 +303,8 @@ async def save_user(request: Request, name: str = Form(...), email: str = Form(.
 
 
 @app.post("/sync/google-sheets")
+@app.get("/gsheets/sync")
+@app.get("/sync/google-sheets")
 async def sync_google_sheets(request: Request):
     if not can(current_user(request), "admin", "router"):
         return RedirectResponse("/", status_code=303)
@@ -280,8 +317,8 @@ async def sync_google_sheets(request: Request):
         from googleapiclient.discovery import build
         service = build("sheets", "v4", credentials=Credentials.from_service_account_info(json.loads(credentials), scopes=["https://www.googleapis.com/auth/spreadsheets"]))
         rows = store.leads()
-        header = ["ID", "Tanggal Visit", "Nama Toko", "Blok", "Lantai", "Los", "PIC", "Jabatan", "HP", "Domestik", "International", "Ekspedisi", "Negara", "Kota", "Tonase", "Periode", "Status Routing", "Jumlah Visit", "Sales"]
-        values = [header] + [[row.get(key, "") for key in ("id", "visit_date", "store_name", "block", "floor", "los", "pic_name", "pic_title", "phone", "domestic", "international", "expedition", "top_country", "top_city", "tonnage", "tonnage_period", "routing_status", "visit_count", "sales_id")] for row in rows]
+        header = ["ID", "Timestamp Visit", "Nama Toko", "Blok", "Lantai", "Los", "PIC", "Jabatan", "HP", "PIC Data Entry", "Jenis Kiriman", "Ekspedisi", "Negara", "Kota", "Tonase KG", "Periode", "Status Routing", "Jumlah Visit", "Sales"]
+        values = [header] + [[row.get(key, "") for key in ("id", "visit_timestamp", "store_name", "block", "floor", "los", "pic_name", "pic_position", "phone_number", "data_entry_pic", "shipment_type", "current_courier", "top_country", "top_city", "tonnage_potential_kg", "tonnage_period", "routing_status", "visit_count", "sales_id")] for row in rows]
         service.spreadsheets().values().update(spreadsheetId=sheet_id, range="Leads!A1", valueInputOption="RAW", body={"values": values}).execute()
         return RedirectResponse("/routing?sync=success", status_code=303)
     except Exception:

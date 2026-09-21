@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+	<h2><i class="bi bi-list-stars text-danger me-2"></i> Daftar Leads</h2>
+	{% if user.role in ['data_entry', 'admin'] %}<a href="/leads/new" class="btn btn-danger"><i class="bi bi-plus-circle me-1"></i> Input Lead</a>{% endif %}
+</div>
+<form method="get" action="/leads" class="input-group mb-3">
+	<input class="form-control" name="search" value="{{ search or '' }}" placeholder="Cari nama toko, blok, PIC, atau sales">
+	<button class="btn btn-outline-danger" type="submit">Cari</button>
+</form>
+<div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
+	<thead><tr><th>Toko</th><th>Lokasi</th><th>PIC</th><th>Ekspedisi</th><th>Tonase (KG)</th><th>Status</th></tr></thead>
+	<tbody>
+	{% for lead in leads %}
+	<tr><td><strong>{{ lead.store_name }}</strong><br><small class="text-muted">{{ lead.visit_timestamp or '-' }}</small></td><td>{{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }}</td><td>{{ lead.pic_name }}<br><small>{{ lead.phone_number }}</small></td><td>{{ lead.current_courier or '-' }}</td><td>{{ lead.tonnage_potential_kg or 0 }}</td><td><span class="badge {% if lead.routing_status == 'Sudah diplot' %}bg-success{% else %}bg-secondary{% endif %}">{{ lead.routing_status or 'Belum diplot' }}</span></td></tr>
+	{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Belum ada data leads.</td></tr>{% endfor %}
+	</tbody>
+</table></div></div>
+{% endblock %}
