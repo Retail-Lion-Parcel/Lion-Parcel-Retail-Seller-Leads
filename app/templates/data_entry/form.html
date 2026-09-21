@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4"><i class="bi bi-pencil-square text-danger me-2"></i> Input Pendataan Leads Tanah Abang</h2>
+
+{% if success %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    {{ success }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+<div class="card shadow-sm p-4">
+    <form action="/data-entry/new" method="POST">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label">Timestamp Visit</label>
+                <input type="datetime-local" name="visit_timestamp" class="form-control" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Nama Toko</label>
+                <input type="text" name="store_name" class="form-control" placeholder="Contoh: Toko Jaya Busana" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">PIC Data Entry</label>
+                <input type="text" name="data_entry_pic" class="form-control" value="{{ user.full_name }}" required>
+            </div>
+
+            <!-- Cluster Tanah Abang -->
+            <div class="col-md-4">
+                <label class="form-label">Blok</label>
+                <input type="text" name="block" class="form-control" placeholder="A / B / F / SLG" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Lantai</label>
+                <input type="text" name="floor" class="form-control" placeholder="1 / 2 / 3A" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Los (Jika Ada)</label>
+                <input type="text" name="los" class="form-control" placeholder="No. 12 / Los B">
+            </div>
+
+            <!-- PIC Toko -->
+            <div class="col-md-4">
+                <label class="form-label">Nama PIC Toko</label>
+                <input type="text" name="pic_name" class="form-control" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Jabatan PIC Toko</label>
+                <input type="text" name="pic_position" class="form-control" placeholder="Owner / Manager Toko" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Nomor HP / Whatsapp</label>
+                <input type="text" name="phone_number" class="form-control" placeholder="08123456789" required>
+            </div>
+
+            <!-- Ekspedisi & Tipe Kiriman -->
+            <div class="col-md-4">
+                <label class="form-label">Jenis Kiriman</label>
+                <select name="shipment_type" class="form-select" required>
+                    <option value="Domestik">Domestik</option>
+                    <option value="International">International</option>
+                    <option value="Keduanya">Keduanya</option>
+                    <option value="Tidak Sama Sekali">Tidak Sama Sekali</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Ekspedisi Yang Digunakan Saat Ini</label>
+                <select name="current_courier" class="form-select" required>
+                    {% for c in couriers %}
+                    <option value="{{ c }}">{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Negara Terbanyak</label>
+                <input type="text" name="top_country" class="form-control" placeholder="Malaysia / Singapore">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">Kota Terbanyak</label>
+                <input type="text" name="top_city" class="form-control" placeholder="Surabaya / Medan">
+            </div>
+
+            <!-- Tonase -->
+            <div class="col-md-6">
+                <label class="form-label">Potensi Tonase Kiriman (KG)</label>
+                <input type="number" step="0.01" name="tonnage_potential_kg" class="form-control" placeholder="100.0" required>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Periode Potensi Tonase</label>
+                <select name="tonnage_period" class="form-select" required>
+                    <option value="Hari">Per Hari</option>
+                    <option value="Bulan" selected>Per Bulan</option>
+                    <option value="Tahun">Per Tahun</option>
+                </select>
+            </div>
+
+            <div class="col-12 mt-4 text-end">
+                <button type="submit" class="btn btn-danger btn-lg px-5"><i class="bi bi-save me-2"></i> Simpan Data Leads</button>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}
