@@ -95,12 +95,26 @@ class Store:
             rows = [row for row in rows if needle in " ".join(str(row.get(k, "")) for k in ("store_name", "block", "pic_name", "sales_id")).lower()]
         return rows
 
+    def routes(self) -> list[dict]:
+        if self.demo:
+            return []
+        return self._request("GET", "visit_routes", params={"select": "*,leads(*),users!visit_routes_sales_id_fkey(id,username,full_name)", "order": "scheduled_date.desc"})
+
     def create_lead(self, data: dict) -> dict:
         data.update({"id": secrets.token_urlsafe(10), "created_at": now_iso(), "updated_at": now_iso(), "visit_count": 0, "routing_status": "Belum diplot"})
         if self.demo:
             DEMO_LEADS.insert(0, data)
             return data
         return self._request("POST", "leads", body=data)[0]
+
+    def assign_route(self, lead_id: str, sales_id: str, router_id: str, scheduled_date: str, notes: str = "") -> None:
+        if self.demo:
+            self.update_lead(lead_id, {"visit_date": scheduled_date, "sales_id": sales_id, "visit_count": 1})
+            return
+        self._request("POST", "visit_routes", body={"lead_id": lead_id, "sales_id": sales_id, "router_id": router_id, "scheduled_date": scheduled_date, "notes": notes, "visit_status": "Scheduled"})
+        lead_rows = self._request("GET", "leads", params={"select": "visit_count", "id": f"eq.{quote(lead_id)}"})
+        current = int(lead_rows[0].get("visit_count") or 0) if lead_rows else 0
+        self.update_lead(lead_id, {"visit_count": current + 1})
 
     def update_lead(self, lead_id: str, data: dict) -> None:
         if self.demo:
@@ -144,7 +158,7 @@ class Store:
             "total": len(rows),
             "routed": routed,
             "visits": sum(int(row.get("visit_count") or 0) for row in rows),
-            "weight": sum(float(row.get("tonnage") or 0) for row in rows),
+            "weight": sum(float(row.get("tonnage_potential_kg") or 0) for row in rows),
             "status_stats": {"Scheduled": routed, "Visited": sum(int(row.get("visit_count") or 0) > 0 for row in rows), "Rescheduled": 0, "Canceled": 0},
             "courier_stats": courier_stats,
         }
