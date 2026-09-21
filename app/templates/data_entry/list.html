@@ -9,11 +9,11 @@
 	<button class="btn btn-outline-danger" type="submit">Cari</button>
 </form>
 <div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
-	<thead><tr><th>Toko</th><th>Lokasi</th><th>PIC</th><th>Ekspedisi</th><th>Tonase (KG)</th><th>Status</th></tr></thead>
+	<thead><tr><th>Toko</th><th>Lokasi</th><th>Nomor</th><th>PIC</th><th>Ekspedisi</th><th>Tonase (KG)</th><th>Status</th></tr></thead>
 	<tbody>
 	{% for lead in leads %}
-	<tr><td><strong>{{ lead.store_name }}</strong><br><small class="text-muted">{{ lead.visit_timestamp or '-' }}</small></td><td>{{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }}</td><td>{{ lead.pic_name }}<br><small>{{ lead.phone_number }}</small></td><td>{{ lead.current_courier or '-' }}</td><td>{{ lead.tonnage_potential_kg or 0 }}</td><td><span class="badge {% if lead.routing_status == 'Sudah diplot' %}bg-success{% else %}bg-secondary{% endif %}">{{ lead.routing_status or 'Belum diplot' }}</span></td></tr>
-	{% else %}<tr><td colspan="6" class="text-center text-muted py-4">Belum ada data leads.</td></tr>{% endfor %}
+	<tr><td><strong>{{ lead.store_name }}</strong><br><small class="text-muted">{{ lead.visit_timestamp or '-' }}</small></td><td>{{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }}</td><td>{{ lead.nomor or '-' }}</td><td>{{ lead.pic_name }}<br><small>{{ lead.phone_number }}</small></td><td>{{ lead.current_courier or '-' }}</td><td>{{ lead.tonnage_potential_kg or 0 }}</td><td><span class="badge {% if lead.routing_status == 'Sudah diplot' %}bg-success{% else %}bg-secondary{% endif %}">{{ lead.routing_status or 'Belum diplot' }}</span></td></tr>
+	{% else %}<tr><td colspan="7" class="text-center text-muted py-4">Belum ada data leads.</td></tr>{% endfor %}
 	</tbody>
 </table></div></div>
 {% endblock %}

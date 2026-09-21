@@ -8,13 +8,25 @@
     <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
 </div>
 {% endif %}
+{% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
+
+<div class="card shadow-sm p-4 mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div><h5 class="mb-1">Upload Data Bulky</h5><small class="text-muted">Gunakan file CSV atau XLSX dengan kolom sesuai template.</small></div>
+        <a href="/leads/template" class="btn btn-outline-danger"><i class="bi bi-download me-1"></i> Download Template</a>
+    </div>
+    <form action="/leads/upload" method="POST" enctype="multipart/form-data" class="row g-2 mt-2">
+        <div class="col-md-9"><input type="file" name="file" class="form-control" accept=".csv,.xlsx" required></div>
+        <div class="col-md-3"><button type="submit" class="btn btn-danger w-100"><i class="bi bi-upload me-1"></i> Upload Data</button></div>
+    </form>
+</div>
 
 <div class="card shadow-sm p-4">
     <form action="/leads" method="POST">
         <div class="row g-3">
             <div class="col-md-4">
-                <label class="form-label">Timestamp Visit</label>
-                <input type="datetime-local" name="visit_timestamp" class="form-control" required>
+                <label class="form-label">Tanggal Submit</label>
+                <input type="text" class="form-control" value="Otomatis saat tombol Simpan ditekan" disabled>
             </div>
             <div class="col-md-4">
                 <label class="form-label">Nama Toko</label>
@@ -22,21 +34,25 @@
             </div>
             <div class="col-md-4">
                 <label class="form-label">PIC Data Entry</label>
-                <input type="text" name="data_entry_pic" class="form-control" value="{{ user.full_name }}" required>
+                <input type="text" class="form-control" value="{{ user.name or user.full_name or user.email }}" disabled>
             </div>
 
             <!-- Cluster Tanah Abang -->
             <div class="col-md-4">
                 <label class="form-label">Blok</label>
-                <input type="text" name="block" class="form-control" placeholder="A / B / F / SLG" required>
+                <select name="block" class="form-select" required><option value="">Pilih Blok</option>{% for item in blocks %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
             <div class="col-md-4">
                 <label class="form-label">Lantai</label>
-                <input type="text" name="floor" class="form-control" placeholder="1 / 2 / 3A" required>
+                <select name="floor" class="form-select" required><option value="">Pilih Lantai</option>{% for item in floors %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
             <div class="col-md-4">
                 <label class="form-label">Los (Jika Ada)</label>
-                <input type="text" name="los" class="form-control" placeholder="No. 12 / Los B">
+                <select name="los" class="form-select"><option value="">Pilih Los</option>{% for item in los_options %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Nomor</label>
+                <input type="text" name="nomor" class="form-control" placeholder="Contoh: 201-203 atau 201">
             </div>
 
             <!-- PIC Toko -->
@@ -46,11 +62,11 @@
             </div>
             <div class="col-md-4">
                 <label class="form-label">Jabatan PIC Toko</label>
-                <input type="text" name="pic_position" class="form-control" placeholder="Owner / Manager Toko" required>
+                <select name="pic_position" class="form-select" required><option value="">Pilih Jabatan</option>{% for item in pic_positions %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
             <div class="col-md-4">
                 <label class="form-label">Nomor HP / Whatsapp</label>
-                <input type="text" name="phone_number" class="form-control" placeholder="08123456789" required>
+                <input type="text" name="phone_number" class="form-control" placeholder="628123456789" required>
             </div>
 
             <!-- Ekspedisi & Tipe Kiriman -->

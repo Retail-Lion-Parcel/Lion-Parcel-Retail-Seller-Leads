@@ -1,4 +1,6 @@
 import hashlib
+import csv
+import io
 import json
 import os
 import secrets
@@ -7,8 +9,8 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
-from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 from starlette.middleware.sessions import SessionMiddleware
@@ -24,6 +26,10 @@ app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET") or 
 templates = Jinja2Templates(directory="app/templates")
 
 EXPEDITIONS = ["Lion Parcel", "Rayspeed Asia", "TLX", "JNT", "JNE", "Sicepat", "Lainnya"]
+BLOCKS = ["A", "B", "C", "D", "E", "F", "G", "PGMTA", "PMTA", "JMTA"]
+FLOORS = ["B3", "B2", "B1", "SLG", "LG", "G", "1", "2", "3", "3A", "4", "5", "6", "7", "8", "9", "10", "11", "12", "12A", "R"]
+LOS_OPTIONS = list("ABCDEFGHIJ")
+PIC_POSITIONS = ["Owner", "Admin Toko", "Lainnya"]
 ROLES = ["data_entry", "admin", "router", "sales"]
 DEMO_USERS = [
     {"id": "demo-admin", "name": "Admin Tanah Abang", "email": "admin@lionparcel.local", "role": "admin", "password": "admin123"},
@@ -182,6 +188,41 @@ def can(user: dict | None, *roles: str) -> bool:
     return bool(user and user.get("role") in roles)
 
 
+def lead_form_context(**extra: Any) -> dict[str, Any]:
+    return {"couriers": EXPEDITIONS, "blocks": BLOCKS, "floors": FLOORS, "los_options": LOS_OPTIONS, "pic_positions": PIC_POSITIONS, **extra}
+
+
+def normalise_choice(value: str, choices: list[str], field: str, required: bool = True) -> str | None:
+    value = value.strip().upper() if field in {"block", "floor", "los"} else value.strip()
+    if not value and not required:
+        return None
+    if value not in choices:
+        raise ValueError(f"{field} tidak valid")
+    return value
+
+
+def build_lead_data(user: dict, *, store_name: str, block: str, floor: str, los: str, nomor: str, pic_name: str, pic_position: str, phone_number: str, shipment_type: str, current_courier: str, top_country: str, top_city: str, tonnage_potential_kg: float, tonnage_period: str) -> dict:
+    return {
+        "visit_timestamp": now_iso(),
+        "store_name": store_name.strip(),
+        "block": normalise_choice(block, BLOCKS, "block"),
+        "floor": normalise_choice(floor, FLOORS, "floor"),
+        "los": normalise_choice(los, LOS_OPTIONS, "los", required=False),
+        "nomor": nomor.strip(),
+        "pic_name": pic_name.strip(),
+        "pic_position": normalise_choice(pic_position, PIC_POSITIONS, "pic_position"),
+        "phone_number": phone_number.strip(),
+        "data_entry_pic": user.get("name") or user.get("full_name") or user.get("email", ""),
+        "shipment_type": shipment_type,
+        "current_courier": current_courier,
+        "top_country": top_country.strip(),
+        "top_city": top_city.strip(),
+        "tonnage_potential_kg": tonnage_potential_kg,
+        "tonnage_period": tonnage_period,
+        "created_by": user["id"],
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     if not current_user(request):
@@ -223,16 +264,57 @@ async def leads_page(request: Request, search: str = ""):
 async def lead_form(request: Request):
     if not can(current_user(request), "data_entry", "admin"):
         return RedirectResponse("/leads", status_code=303)
-    return render(request, "data_entry/form.html", title="Tambah Lead", couriers=EXPEDITIONS, success=None)
+    return render(request, "data_entry/form.html", title="Tambah Lead", **lead_form_context(success=request.query_params.get("success"), error=request.query_params.get("error")))
 
 
 @app.post("/leads")
-async def create_lead(request: Request, visit_timestamp: str = Form(""), timestamp_visit: str = Form(""), store_name: str = Form(...), block: str = Form(...), floor: str = Form(...), los: str = Form(""), pic_name: str = Form(...), pic_position: str = Form(""), pic_title: str = Form(""), phone_number: str = Form(""), phone: str = Form(""), data_entry_pic: str = Form(""), shipment_type: str = Form(""), current_courier: str = Form(""), domestic: str = Form("Tidak"), international: str = Form("Tidak"), expedition: str = Form(""), top_country: str = Form(""), top_city: str = Form(""), tonnage_potential_kg: float = Form(0), tonnage: float = Form(0), tonnage_period: str = Form("Bulan")):
+async def create_lead(request: Request, store_name: str = Form(...), block: str = Form(...), floor: str = Form(...), los: str = Form(""), nomor: str = Form(""), pic_name: str = Form(...), pic_position: str = Form(...), phone_number: str = Form(...), shipment_type: str = Form(...), current_courier: str = Form(...), top_country: str = Form(""), top_city: str = Form(""), tonnage_potential_kg: float = Form(0), tonnage_period: str = Form("Bulan")):
     user = current_user(request)
     if not can(user, "data_entry", "admin"):
         return RedirectResponse("/leads", status_code=303)
-    store.create_lead({"visit_timestamp": visit_timestamp or timestamp_visit, "store_name": store_name, "block": block.upper(), "floor": floor.upper(), "los": los.upper() or None, "pic_name": pic_name, "pic_position": pic_position or pic_title, "phone_number": phone_number or phone, "data_entry_pic": data_entry_pic or user.get("name", ""), "shipment_type": shipment_type or ("Keduanya" if domestic == "Ya" and international == "Ya" else "Domestik"), "current_courier": current_courier or expedition, "top_country": top_country, "top_city": top_city, "tonnage_potential_kg": tonnage_potential_kg or tonnage, "tonnage_period": tonnage_period, "created_by": user["id"]})
+    try:
+        store.create_lead(build_lead_data(user, store_name=store_name, block=block, floor=floor, los=los, nomor=nomor, pic_name=pic_name, pic_position=pic_position, phone_number=phone_number, shipment_type=shipment_type, current_courier=current_courier, top_country=top_country, top_city=top_city, tonnage_potential_kg=tonnage_potential_kg, tonnage_period=tonnage_period))
+    except ValueError as exc:
+        return RedirectResponse(f"/leads/new?error={quote(str(exc))}", status_code=303)
     return RedirectResponse("/leads?created=1", status_code=303)
+
+
+@app.get("/leads/template")
+async def download_lead_template(request: Request):
+    if not can(current_user(request), "data_entry", "admin"):
+        return RedirectResponse("/leads", status_code=303)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["store_name", "block", "floor", "los", "nomor", "pic_name", "pic_position", "phone_number", "shipment_type", "current_courier", "top_country", "top_city", "tonnage_potential_kg", "tonnage_period"])
+    writer.writerow(["Contoh Toko", "A", "1", "A", "201-203", "Nama PIC", "Owner", "08123456789", "Domestik", "JNE", "Indonesia", "Jakarta", "100", "Bulan"])
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=template_leads.csv"})
+
+
+@app.post("/leads/upload")
+async def upload_leads(request: Request, file: UploadFile = File(...)):
+    user = current_user(request)
+    if not can(user, "data_entry", "admin"):
+        return RedirectResponse("/leads", status_code=303)
+    filename = (file.filename or "").lower()
+    raw = await file.read()
+    try:
+        if filename.endswith(".csv"):
+            rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
+        elif filename.endswith(".xlsx"):
+            from openpyxl import load_workbook
+            workbook = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+            sheet = workbook.active
+            values = list(sheet.values)
+            rows = [dict(zip(values[0], row)) for row in values[1:] if any(row)]
+        else:
+            raise ValueError("File harus berformat CSV atau XLSX")
+        if not rows:
+            raise ValueError("File tidak memiliki data")
+        for row in rows:
+            store.create_lead(build_lead_data(user, store_name=str(row.get("store_name", "")), block=str(row.get("block", "")), floor=str(row.get("floor", "")), los=str(row.get("los", "")), nomor=str(row.get("nomor", "")), pic_name=str(row.get("pic_name", "")), pic_position=str(row.get("pic_position", "")), phone_number=str(row.get("phone_number", "")), shipment_type=str(row.get("shipment_type", "Domestik")), current_courier=str(row.get("current_courier", "")), top_country=str(row.get("top_country", "")), top_city=str(row.get("top_city", "")), tonnage_potential_kg=float(row.get("tonnage_potential_kg") or 0), tonnage_period=str(row.get("tonnage_period", "Bulan"))))
+    except (ValueError, TypeError, KeyError, UnicodeDecodeError) as exc:
+        return RedirectResponse(f"/leads/new?error={quote(f'Upload gagal: {exc}')}", status_code=303)
+    return RedirectResponse(f"/leads/new?success={quote(f'{len(rows)} leads berhasil diupload')}", status_code=303)
 
 
 @app.get("/routing", response_class=HTMLResponse)
@@ -317,8 +399,8 @@ async def sync_google_sheets(request: Request):
         from googleapiclient.discovery import build
         service = build("sheets", "v4", credentials=Credentials.from_service_account_info(json.loads(credentials), scopes=["https://www.googleapis.com/auth/spreadsheets"]))
         rows = store.leads()
-        header = ["ID", "Timestamp Visit", "Nama Toko", "Blok", "Lantai", "Los", "PIC", "Jabatan", "HP", "PIC Data Entry", "Jenis Kiriman", "Ekspedisi", "Negara", "Kota", "Tonase KG", "Periode", "Status Routing", "Jumlah Visit", "Sales"]
-        values = [header] + [[row.get(key, "") for key in ("id", "visit_timestamp", "store_name", "block", "floor", "los", "pic_name", "pic_position", "phone_number", "data_entry_pic", "shipment_type", "current_courier", "top_country", "top_city", "tonnage_potential_kg", "tonnage_period", "routing_status", "visit_count", "sales_id")] for row in rows]
+        header = ["ID", "Timestamp Visit", "Nama Toko", "Blok", "Lantai", "Los", "Nomor", "PIC", "Jabatan", "HP", "PIC Data Entry", "Jenis Kiriman", "Ekspedisi", "Negara", "Kota", "Tonase KG", "Periode", "Status Routing", "Jumlah Visit", "Sales"]
+        values = [header] + [[row.get(key, "") for key in ("id", "visit_timestamp", "store_name", "block", "floor", "los", "nomor", "pic_name", "pic_position", "phone_number", "data_entry_pic", "shipment_type", "current_courier", "top_country", "top_city", "tonnage_potential_kg", "tonnage_period", "routing_status", "visit_count", "sales_id")] for row in rows]
         service.spreadsheets().values().update(spreadsheetId=sheet_id, range="Leads!A1", valueInputOption="RAW", body={"values": values}).execute()
         return RedirectResponse("/routing?sync=success", status_code=303)
     except Exception:
