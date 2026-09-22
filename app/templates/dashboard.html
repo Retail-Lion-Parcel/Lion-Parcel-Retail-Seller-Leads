@@ -7,31 +7,40 @@
     {% endif %}
 </div>
 
-<div class="row mb-4">
-    <div class="col-md-4">
-        <div class="card text-white bg-danger mb-3 shadow-sm">
+<div class="row mb-4 g-3">
+    <div class="col-12 col-sm-6 col-lg-3">
+        <div class="card text-white bg-danger h-100 shadow-sm">
             <div class="card-body">
-                <h5 class="card-title">Total Leads Toko</h5>
+                <h5 class="card-title"><i class="bi bi-shop me-1"></i> Total Leads Toko</h5>
                 <h2 class="display-5 fw-bold">{{ total_leads }}</h2>
-                <p class="card-text">Toko terdata di Tanah Abang</p>
+                <p class="card-text mb-0">Toko terdata di Tanah Abang</p>
             </div>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="card text-white bg-dark mb-3 shadow-sm">
+    <div class="col-12 col-sm-6 col-lg-3">
+        <div class="card text-white bg-dark h-100 shadow-sm">
             <div class="card-body">
-                <h5 class="card-title">Total Potensi Tonase</h5>
-                <h2 class="display-5 fw-bold">{{ total_tonnage_ton }} <small class="fs-5">Ton</small></h2>
-                <p class="card-text">Estimasi akumulasi pengiriman</p>
+                <h5 class="card-title"><i class="bi bi-box-seam me-1"></i> Potensi Tonase / Bulan</h5>
+                <h2 class="display-5 fw-bold">{{ total_tonnage_month_ton }} <small class="fs-5">Ton</small></h2>
+                <p class="card-text mb-0">Estimasi pengiriman per bulan</p>
             </div>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="card text-white bg-warning mb-3 shadow-sm">
-            <div class="card-body text-dark">
-                <h5 class="card-title">Status Visit Scheduled</h5>
-                <h2 class="display-5 fw-bold">{{ status_stats.Scheduled }}</h2>
-                <p class="card-text">Jadwal kunjungan pending</p>
+    <div class="col-12 col-sm-6 col-lg-3">
+        <div class="card text-white bg-primary h-100 shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-signpost-split me-1"></i> Leads Sudah Dirouting</h5>
+                <h2 class="display-5 fw-bold">{{ leads_routed }}</h2>
+                <p class="card-text mb-0">Toko yang sudah dijadwalkan</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-sm-6 col-lg-3">
+        <div class="card text-white bg-success h-100 shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title"><i class="bi bi-check2-circle me-1"></i> Leads Tervisit</h5>
+                <h2 class="display-5 fw-bold">{{ leads_visited }}</h2>
+                <p class="card-text mb-0">Kunjungan selesai</p>
             </div>
         </div>
     </div>

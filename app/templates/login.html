@@ -2,39 +2,59 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#b71c1c">
     <title>Login - Lion Parcel Tanah Abang</title>
     <link rel="icon" type="image/png" href="/static/images/lion-parcel-icon-white.png">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background: linear-gradient(135deg, #d32f2f, #b71c1c); min-height: 100vh; display: flex; align-items: center; }
+        html, body { height: 100%; }
+        body {
+            background: linear-gradient(135deg, #d32f2f, #b71c1c);
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+            margin: 0;
+        }
+        .login-wrapper { width: 100%; max-width: 400px; }
         .card-login { border-radius: 15px; border: none; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
         .login-logo { width: 100%; max-width: 270px; height: auto; object-fit: contain; }
+        /* Cegah iOS auto-zoom saat fokus input */
+        .form-control { font-size: 16px; }
+        @media (max-width: 575.98px) {
+            body { align-items: flex-start; padding-top: max(1.5rem, env(safe-area-inset-top)); }
+            .card-login { border-radius: 12px; }
+            .login-logo { max-width: 200px; }
+            .card-login .card-body { padding: 1.25rem !important; }
+        }
     </style>
 </head>
 <body>
-<div class="container">
-    <div class="row justify-content-center">
-        <div class="col-md-4">
-            <div class="card card-login p-4">
-                <div class="text-center mb-4">
-                    <img class="login-logo" src="/static/images/lion-parcel-red.png" alt="Lion Parcel">
-                    <p class="text-muted">Leads & Routing System Tanah Abang</p>
-                </div>
-                {% if error %}
-                <div class="alert alert-danger py-2 fs-6">{{ error }}</div>
-                {% endif %}
-                <form action="/login" method="POST">
-                    <div class="mb-3">
-                        <label class="form-label">Username / Email</label>
-                        <input type="text" name="email" class="form-control" required placeholder="admin atau nama@lionparcel.local">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Password</label>
-                        <input type="password" name="password" class="form-control" required placeholder="Masukkan password">
-                    </div>
-                    <button type="submit" class="btn btn-danger w-100 mt-2 py-2 fw-bold">LOGIN</button>
-                </form>
+<div class="login-wrapper">
+    <div class="card card-login">
+        <div class="card-body p-4">
+            <div class="text-center mb-4">
+                <img class="login-logo" src="/static/images/lion-parcel-red.png" alt="Lion Parcel">
+                <p class="text-muted mb-0">Leads &amp; Routing System Tanah Abang</p>
             </div>
+            {% if error %}
+            <div class="alert alert-danger py-2 fs-6">{{ error }}</div>
+            {% endif %}
+            <form action="/login" method="POST">
+                <div class="mb-3">
+                    <label class="form-label" for="username">Username</label>
+                    <input type="text" id="username" name="username" class="form-control" required placeholder="Masukkan username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="password">Password</label>
+                    <input type="password" id="password" name="password" class="form-control" required placeholder="Masukkan password" autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn btn-danger w-100 mt-2 py-2 fw-bold">LOGIN</button>
+            </form>
         </div>
     </div>
 </div>

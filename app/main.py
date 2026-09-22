@@ -8,6 +8,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import requests
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -35,18 +36,33 @@ LOS_OPTIONS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "FNO"]
 PIC_POSITIONS = ["Owner", "Karyawan Toko", "Lainnya"]
 TOP_COUNTRIES = ["Indonesia", "Malaysia Timur", "Malaysia Barat", "Singapore", "Thailand", "Vietnam", "Philippines", "Brunei", "China", "Hong Kong", "Taiwan", "South Korea", "Japan", "Australia", "United States", "United Kingdom", "Lainnya"]
 TOP_CITIES = ["Jakarta", "Bandung", "Surabaya", "Medan", "Semarang", "Yogyakarta", "Makassar", "Denpasar", "Palembang", "Banjarmasin", "Pontianak", "Balikpapan", "Padang", "Pekanbaru", "Bandar Lampung", "Malang", "Solo", "Bogor", "Depok", "Tangerang", "Bekasi", "Serang", "Cirebon", "Tasikmalaya", "Purwakarta", "Sukabumi", "Mataram", "Kupang", "Manado", "Palu", "Kendari", "Ambon", "Jayapura", "Samarinda", "Banda Aceh", "Lainnya"]
-ROLES = ["Data Entry", "Admin", "Router", "Sales"]
+ROLE_LABELS = {"data_entry": "Data Entry", "admin": "Admin", "router": "Router", "sales": "Sales"}
+ROLES = list(ROLE_LABELS)
 DEMO_USERS = [
-    {"id": "demo-admin", "name": "Admin Tanah Abang", "email": "admin@lionparcel.local", "role": "admin", "password": "admin123"},
-    {"id": "demo-entry", "name": "Data Entry", "email": "entry@lionparcel.local", "role": "data_entry", "password": "entry123"},
-    {"id": "demo-router", "name": "Router Visit", "email": "router@lionparcel.local", "role": "router", "password": "router123"},
-    {"id": "demo-sales", "name": "Sales Tanah Abang", "email": "sales@lionparcel.local", "role": "sales", "password": "sales123"},
+    {"id": "demo-admin", "name": "Admin Tanah Abang", "username": "admin", "role": "admin", "password": "admin123"},
+    {"id": "demo-entry", "name": "Data Entry", "username": "dataentry", "role": "data_entry", "password": "entry123"},
+    {"id": "demo-router", "name": "Router Visit", "username": "router", "role": "router", "password": "router123"},
+    {"id": "demo-sales", "name": "Sales Tanah Abang", "username": "sales", "role": "sales", "password": "sales123"},
 ]
 DEMO_LEADS: list[dict[str, Any]] = []
+DEMO_ROUTING_TARGETS: dict[str, int] = {}
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def format_datetime(value: Any) -> str:
+    if not value:
+        return "-"
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        local_time = parsed.astimezone(ZoneInfo("Asia/Jakarta"))
+        return local_time.strftime("%d %B %Y, %H:%M WIB")
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def password_hash(password: str) -> str:
@@ -75,19 +91,19 @@ class Store:
         return {
             "id": row.get("id"),
             "name": row.get("name") or row.get("full_name") or row.get("username"),
-            "email": row.get("email") or row.get("username"),
+            "username": row.get("username") or row.get("email"),
             "role": row.get("role"),
             "active": row.get("active", row.get("is_active", True)),
         }
 
-    def authenticate(self, email: str, password: str) -> dict | None:
+    def authenticate(self, username: str, password: str) -> dict | None:
         if self.demo:
-            user = next((u for u in DEMO_USERS if u["email"].lower() == email.lower() and u["password"] == password), None)
+            user = next((u for u in DEMO_USERS if u["username"].lower() == username.lower() and u["password"] == password and u.get("active", True)), None)
             return {k: v for k, v in user.items() if k != "password"} if user else None
         users = self._request("GET", "users", params={"select": "*"})
         for row in users:
-            login_name = row.get("email") or row.get("username") or ""
-            if login_name.lower() != email.lower():
+            login_name = row.get("username") or ""
+            if login_name.lower() != username.lower():
                 continue
             stored_hash = row.get("password_hash", "")
             valid = False
@@ -113,6 +129,23 @@ class Store:
                 for lead in DEMO_LEADS if lead.get("sales_id")
             ]
         return self._request("GET", "visit_routes", params={"select": "*,leads(*),users!visit_routes_sales_id_fkey(id,username,full_name)", "order": "scheduled_date.desc"})
+
+    def routing_target(self, month: str) -> int:
+        if self.demo:
+            return DEMO_ROUTING_TARGETS.get(month, 0)
+        rows = self._request("GET", "routing_targets", params={"select": "target_count", "month": f"eq.{quote(month)}", "limit": "1"})
+        return int(rows[0].get("target_count") or 0) if rows else 0
+
+    def save_routing_target(self, month: str, target_count: int, user_id: str) -> None:
+        if self.demo:
+            DEMO_ROUTING_TARGETS[month] = target_count
+            return
+        existing = self._request("GET", "routing_targets", params={"select": "id", "month": f"eq.{quote(month)}", "limit": "1"})
+        payload = {"month": month, "target_count": target_count, "updated_by": user_id}
+        if existing:
+            self._request("PATCH", "routing_targets", params={"id": f"eq.{quote(str(existing[0]['id']))}"}, body=payload)
+        else:
+            self._request("POST", "routing_targets", body=payload)
 
     def create_lead(self, data: dict) -> dict:
         if self.demo:
@@ -153,7 +186,9 @@ class Store:
             return
         existing = self._request("GET", "users", params={"select": "*", "limit": "1"})
         legacy_schema = bool(existing and "username" in existing[0])
-        payload = ({"username": data["email"], "full_name": data["name"], "role": data["role"], "is_active": True} if legacy_schema else {"name": data["name"], "email": data["email"], "role": data["role"], "active": True})
+        payload = {"username": data["username"], "full_name": data["name"], "role": data["role"]} if legacy_schema else {"name": data["name"], "username": data["username"], "role": data["role"]}
+        if not user_id:
+            payload["is_active" if legacy_schema else "active"] = True
         if password:
             if bcrypt:
                 payload["password_hash"] = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
@@ -161,6 +196,22 @@ class Store:
             self._request("PATCH", "users", params={"id": f"eq.{quote(user_id)}"}, body=payload)
         else:
             self._request("POST", "users", body=payload)
+
+    def set_user_active(self, user_id: str, active: bool) -> None:
+        if self.demo:
+            user = next((item for item in DEMO_USERS if item["id"] == user_id), None)
+            if user:
+                user["active"] = active
+            return
+        existing = self._request("GET", "users", params={"select": "*", "limit": "1"})
+        status_field = "is_active" if existing and "is_active" in existing[0] else "active"
+        self._request("PATCH", "users", params={"id": f"eq.{quote(user_id)}"}, body={status_field: active})
+
+    def delete_user(self, user_id: str) -> None:
+        if self.demo:
+            DEMO_USERS[:] = [user for user in DEMO_USERS if user["id"] != user_id]
+            return
+        self._request("DELETE", "users", params={"id": f"eq.{quote(user_id)}"})
 
     def stats(self) -> dict:
         rows = self.leads()
@@ -187,11 +238,18 @@ def current_user(request: Request) -> dict | None:
 
 
 def render(request: Request, template: str, **context: Any) -> HTMLResponse:
-    return templates.TemplateResponse(template, {"request": request, "user": current_user(request), "demo": store.demo, "expeditions": EXPEDITIONS, **context})
+    return templates.TemplateResponse(template, {"request": request, "user": current_user(request), "demo": store.demo, "expeditions": EXPEDITIONS, "role_labels": ROLE_LABELS, "format_datetime": format_datetime, **context})
 
 
 def can(user: dict | None, *roles: str) -> bool:
     return bool(user and user.get("role") in roles)
+
+
+def normalise_role(value: str) -> str:
+    cleaned = value.strip().lower().replace(" ", "_")
+    if cleaned not in ROLE_LABELS:
+        raise ValueError("Role user tidak valid")
+    return cleaned
 
 
 def lead_form_context(**extra: Any) -> dict[str, Any]:
@@ -225,6 +283,35 @@ def required_text(value: str, field: str) -> str:
     return value
 
 
+def monthly_tonnage(lead: dict) -> float:
+    amount = float(lead.get("tonnage_potential_kg") or 0)
+    period = str(lead.get("tonnage_period") or "Bulan").strip().lower()
+    if period in {"hari", "per hari"}:
+        return amount * 30
+    if period in {"tahun", "per tahun"}:
+        return amount / 12
+    return amount
+
+
+def has_international_history(lead: dict) -> bool:
+    shipment_type = str(lead.get("shipment_type", "")).lower()
+    return shipment_type in {"international", "keduanya"} or "international" in shipment_type or "international" in str(lead.get("top_country", "")).lower()
+
+
+def recommendation_score(candidate: dict, selected: dict | None = None) -> tuple[float, float]:
+    score = monthly_tonnage(candidate)
+    if has_international_history(candidate):
+        score += 100000
+    if selected:
+        if candidate.get("block") == selected.get("block"):
+            score += 50000
+        if candidate.get("floor") == selected.get("floor"):
+            score += 30000
+        if candidate.get("los") == selected.get("los"):
+            score += 10000
+    return score, monthly_tonnage(candidate)
+
+
 def selection_text(value: str | list[str], field: str, required: bool = True) -> str:
     values = [value] if isinstance(value, str) else value
     cleaned = [item.strip() for item in values if item and item.strip()]
@@ -253,7 +340,7 @@ def build_lead_data(user: dict, *, store_name: str, block: str, floor: str, los:
         "pic_name": pic_name.strip(),
         "pic_position": normalise_choice(pic_position, PIC_POSITIONS, "pic_position"),
         "phone_number": normalise_phone_number(phone_number),
-        "data_entry_pic": user.get("name") or user.get("full_name") or user.get("email", ""),
+        "data_entry_pic": user.get("name") or user.get("full_name") or user.get("username", ""),
         "shipment_type": shipment_type,
         "current_courier": selection_text(current_courier, "Ekspedisi"),
         "top_country": selection_text(top_country, "Negara Terbanyak", required=False),
@@ -279,11 +366,10 @@ async def login_page(request: Request):
 
 @app.post("/login")
 @app.post("/auth/login")
-async def login(request: Request, email: str = Form(""), password: str = Form(...), username: str = Form("")):
-    email = (email or username).strip()
-    user = store.authenticate(email, password)
+async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    user = store.authenticate(username.strip(), password)
     if not user:
-        return render(request, "login.html", title="Masuk", error="Email atau password tidak valid.")
+        return render(request, "login.html", title="Masuk", error="Username atau password tidak valid.")
     request.session["user"] = user
     return RedirectResponse("/", status_code=303)
 
@@ -295,10 +381,33 @@ async def logout(request: Request):
 
 
 @app.get("/leads", response_class=HTMLResponse)
-async def leads_page(request: Request, search: str = ""):
+async def leads_page(request: Request, search: str = "", block: str = "", floor: str = "", los: str = "", expedition: str = "", sort_by: str = "newest", page: int = 1, per_page: int = 20):
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
-    return render(request, "data_entry/list.html", title="Daftar Leads", leads=store.leads(search), search=search)
+    all_leads = store.leads(search)
+    filtered = []
+    for lead in all_leads:
+        if block and str(lead.get("block", "")) != block:
+            continue
+        if floor and str(lead.get("floor", "")) != floor:
+            continue
+        if los and str(lead.get("los", "")) != los:
+            continue
+        if expedition and expedition.lower() not in str(lead.get("current_courier", "")).lower():
+            continue
+        lead["monthly_tonnage_kg"] = monthly_tonnage(lead)
+        filtered.append(lead)
+    if sort_by == "monthly_tonnage":
+        filtered.sort(key=lambda lead: lead["monthly_tonnage_kg"], reverse=True)
+    else:
+        sort_by = "newest"
+        filtered.sort(key=lambda lead: str(lead.get("created_at") or lead.get("visit_timestamp") or ""), reverse=True)
+    per_page = min(max(per_page, 10), 100)
+    total = len(filtered)
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = min(max(page, 1), total_pages)
+    start = (page - 1) * per_page
+    return render(request, "data_entry/list.html", title="Daftar Leads", leads=filtered[start:start + per_page], search=search, block=block, floor=floor, los=los, expedition=expedition, sort_by=sort_by, page=page, per_page=per_page, total=total, total_pages=total_pages, blocks=BLOCKS, floors=FLOORS, los_options=LOS_OPTIONS, courier_options=EXPEDITIONS)
 
 
 @app.get("/leads/new", response_class=HTMLResponse)
@@ -414,8 +523,33 @@ async def routing_page(request: Request):
         grouped.setdefault(key, []).append(row)
     selected_id = request.query_params.get("selected_lead_id")
     selected = next((row for row in rows if row.get("id") == selected_id), None)
-    recommendations = [row for row in rows if selected and row.get("id") != selected_id and row.get("block") == selected.get("block") and row.get("floor") == selected.get("floor")]
-    return render(request, "router/routing.html", title="Routing Visit", groups=grouped, leads=rows, sales_users=[item for item in store.users() if item.get("role") == "sales"], selected_lead=selected, recommendations=recommendations, routes=store.routes())
+    if selected:
+        selected["monthly_tonnage_kg"] = monthly_tonnage(selected)
+        selected["has_international"] = has_international_history(selected)
+    recommendations = [row for row in rows if row.get("id") != selected_id]
+    for row in recommendations:
+        row["monthly_tonnage_kg"] = monthly_tonnage(row)
+        row["has_international"] = has_international_history(row)
+        row["recommendation_score"] = recommendation_score(row, selected)[0]
+    recommendations.sort(key=lambda row: row["recommendation_score"], reverse=True)
+    sales_users = [item for item in store.users() if item.get("role") in {"sales", "Sales"}]
+    month = request.query_params.get("month") or datetime.now().strftime("%Y-%m")
+    routes = store.routes()
+    routed_this_month = sum(1 for route in routes if str(route.get("scheduled_date", "")).startswith(month))
+    routing_target = store.routing_target(month)
+    routing_progress = min((routed_this_month / routing_target) * 100, 100) if routing_target else 0
+    return render(request, "router/routing.html", title="Routing Visit", groups=grouped, leads=rows, sales_users=sales_users, selected_lead=selected, recommendations=recommendations[:30], routes=routes, target_month=month, routing_target=routing_target, routed_this_month=routed_this_month, routing_progress=routing_progress, monthly_tonnage=monthly_tonnage, has_international_history=has_international_history)
+
+
+@app.post("/routing/target")
+async def save_routing_target(request: Request, month: str = Form(...), target_count: int = Form(...)):
+    user = current_user(request)
+    if not can(user, "router", "admin"):
+        return RedirectResponse("/", status_code=303)
+    if target_count < 0:
+        return RedirectResponse(f"/routing?month={quote(month)}&error=Target%20tidak%20boleh%20negatif", status_code=303)
+    store.save_routing_target(month, target_count, user["id"])
+    return RedirectResponse(f"/routing?month={quote(month)}&target_saved=1", status_code=303)
 
 
 @app.get("/sales/schedule", response_class=HTMLResponse)
@@ -447,6 +581,28 @@ async def assign_route(request: Request, lead_id: str = Form(...), sales_id: str
     return RedirectResponse("/routing?success=1", status_code=303)
 
 
+@app.post("/routing/assign-bulk")
+async def assign_routes_bulk(request: Request):
+    user = current_user(request)
+    if not can(user, "router", "admin"):
+        return RedirectResponse("/", status_code=303)
+    form = await request.form()
+    lead_ids = form.getlist("lead_id")
+    if not lead_ids:
+        return RedirectResponse("/routing?error=Pilih%20minimal%20satu%20lead", status_code=303)
+    notes = str(form.get("notes") or "")
+    try:
+        for lead_id in lead_ids:
+            sales_id = str(form.get(f"sales_id_{lead_id}") or "")
+            scheduled_date = str(form.get(f"scheduled_date_{lead_id}") or "")
+            if not sales_id or not scheduled_date:
+                raise ValueError(f"Sales dan tanggal wajib diisi untuk lead {lead_id}")
+            store.assign_route(str(lead_id), sales_id, user["id"], scheduled_date, notes)
+    except (ValueError, requests.RequestException) as exc:
+        return RedirectResponse(f"/routing?error={quote(str(exc))}", status_code=303)
+    return RedirectResponse(f"/routing?success={len(lead_ids)}", status_code=303)
+
+
 @app.post("/routing/{lead_id}")
 async def update_routing(request: Request, lead_id: str, visit_date: str = Form(...), visit_count: int = Form(0), sales_id: str = Form("")):
     if not can(current_user(request), "router", "admin"):
@@ -463,11 +619,41 @@ async def users_page(request: Request):
 
 
 @app.post("/users")
-async def save_user(request: Request, name: str = Form(...), email: str = Form(...), role: str = Form(...), password: str = Form(""), user_id: str = Form("")):
-    if not can(current_user(request), "admin") or role not in ROLES:
+async def save_user(request: Request, name: str = Form(...), username: str = Form(...), role: str = Form(...), password: str = Form(""), user_id: str = Form("")):
+    try:
+        role = normalise_role(role)
+    except ValueError:
         return RedirectResponse("/", status_code=303)
-    store.save_user({"name": name, "email": email, "role": role, "password": password}, user_id or None)
+    if not can(current_user(request), "admin"):
+        return RedirectResponse("/", status_code=303)
+    store.save_user({"name": name, "username": username, "role": role, "password": password}, user_id or None)
     return RedirectResponse("/users?saved=1", status_code=303)
+
+
+@app.post("/users/toggle-status")
+async def toggle_user_status(request: Request, user_id: str = Form(...), active: bool = Form(...)):
+    current = current_user(request)
+    if not can(current, "admin") or user_id == current.get("id"):
+        return RedirectResponse("/users?error=Tidak%20dapat%20mengubah%20status%20akun%20sendiri", status_code=303)
+    try:
+        store.set_user_active(user_id, not active)
+    except requests.RequestException as exc:
+        print(f"Toggle user error: {exc}")
+        return RedirectResponse("/users?error=Status%20user%20gagal%20diubah", status_code=303)
+    return RedirectResponse("/users?saved=1", status_code=303)
+
+
+@app.post("/users/delete")
+async def delete_user(request: Request, user_id: str = Form(...)):
+    current = current_user(request)
+    if not can(current, "admin") or user_id == current.get("id"):
+        return RedirectResponse("/users?error=Tidak%20dapat%20menghapus%20akun%20sendiri", status_code=303)
+    try:
+        store.delete_user(user_id)
+    except requests.RequestException as exc:
+        print(f"Delete user error: {exc}")
+        return RedirectResponse("/users?error=User%20gagal%20dihapus", status_code=303)
+    return RedirectResponse("/users?deleted=1", status_code=303)
 
 
 @app.post("/sync/google-sheets")

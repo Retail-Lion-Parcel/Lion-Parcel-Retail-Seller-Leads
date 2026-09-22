@@ -1,6 +1,54 @@
 {% extends "base.html" %}
 {% block content %}
 <h2 class="mb-4"><i class="bi bi-people text-danger me-2"></i> Kelola User</h2>
-<div class="card shadow-sm p-4 mb-4"><form method="post" action="/users" class="row g-3"><div class="col-md-3"><input name="name" class="form-control" placeholder="Nama lengkap" required></div><div class="col-md-3"><input name="email" type="email" class="form-control" placeholder="Email" required></div><div class="col-md-2"><select name="role" class="form-select" required>{% for role in ['data_entry', 'router', 'sales', 'admin'] %}<option value="{{ role }}">{{ role }}</option>{% endfor %}</select></div><div class="col-md-2"><input name="password" type="password" class="form-control" placeholder="Password" required></div><div class="col-md-2"><button class="btn btn-danger w-100" type="submit">Tambah User</button></div></form></div>
-<div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover mb-0"><thead><tr><th>Nama</th><th>Email</th><th>Role</th><th>Status</th></tr></thead><tbody>{% for item in users_list %}<tr><td>{{ item.name or item.full_name }}</td><td>{{ item.email or item.username }}</td><td>{{ item.role }}</td><td><span class="badge bg-success">Aktif</span></td></tr>{% else %}<tr><td colspan="4" class="text-center text-muted py-4">Belum ada user.</td></tr>{% endfor %}</tbody></table></div></div>
+
+<div class="card shadow-sm p-4 mb-4">
+    <form method="post" action="/users" class="row g-3">
+        <div class="col-md-3"><input name="name" class="form-control" placeholder="Nama lengkap" required></div>
+        <div class="col-md-3"><input name="username" class="form-control" placeholder="Username" required></div>
+        <div class="col-md-2"><select name="role" class="form-select" required>{% for value, label in role_labels.items() %}<option value="{{ label }}">{{ label }}</option>{% endfor %}</select></div>
+        <div class="col-md-2"><input name="password" type="password" class="form-control" placeholder="Password" required></div>
+        <div class="col-md-2"><button class="btn btn-danger w-100" type="submit">Tambah User</button></div>
+    </form>
+</div>
+
+<div class="card shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Nama</th><th>Username</th><th>Role</th><th>Password Baru</th><th>Status</th><th>Aksi</th></tr></thead>
+            <tbody>
+            {% for item in users_list %}
+            {% set is_active = item.active if item.active is defined else true %}
+            {% set edit_id = 'edit-user-' ~ item.id %}
+            <form id="{{ edit_id }}" method="post" action="/users"></form>
+            <tr>
+                <td><input form="{{ edit_id }}" name="name" class="form-control form-control-sm" value="{{ item.name or item.full_name }}" required><input form="{{ edit_id }}" type="hidden" name="user_id" value="{{ item.id }}"></td>
+                <td><input form="{{ edit_id }}" name="username" class="form-control form-control-sm" value="{{ item.username }}" required></td>
+                <td><select form="{{ edit_id }}" name="role" class="form-select form-select-sm" required>{% for value, label in role_labels.items() %}<option value="{{ label }}" {% if item.role == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+                <td><input form="{{ edit_id }}" name="password" type="password" class="form-control form-control-sm opacity-50" placeholder="Kosongkan Untuk Tidak Diubah"></td>
+                <td><span class="badge {% if is_active %}bg-success{% else %}bg-secondary{% endif %}">{% if is_active %}Aktif{% else %}Nonaktif{% endif %}</span></td>
+                <td class="d-flex gap-1 flex-wrap">
+                    <button form="{{ edit_id }}" class="btn btn-sm btn-danger" type="submit">Simpan Edit</button>
+                    
+                    {% if item.id != user.id %}
+                    <form method="post" action="/users/toggle-status">
+                        <input type="hidden" name="user_id" value="{{ item.id }}">
+                        <input type="hidden" name="active" value="{{ 'true' if is_active else 'false' }}">
+                        <button class="btn btn-sm {% if is_active %}btn-outline-warning{% else %}btn-outline-success{% endif %}" type="submit">
+                            {% if is_active %}Nonaktifkan{% else %}Aktifkan{% endif %}
+                        </button>
+                    </form>
+                    <form method="post" action="/users/delete" onsubmit="return confirm('Hapus user ini?')">
+                        <input type="hidden" name="user_id" value="{{ item.id }}">
+                        <button class="btn btn-sm btn-outline-danger" type="submit">Hapus</button>
+                    </form>
+                    {% endif %}
+                    
+                </td>
+            </tr>
+            {% else %}<tr><td colspan="6" class="text-center text-muted py-4">Belum ada user.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 {% endblock %}

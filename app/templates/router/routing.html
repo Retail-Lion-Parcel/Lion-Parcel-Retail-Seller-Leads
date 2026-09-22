@@ -1,63 +1,42 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+    .routing-summary { border: 0; border-left: 4px solid #d32f2f; }
+    .routing-stat { border: 1px solid #f1d2d5; border-radius: .6rem; padding: .75rem; background: #fff8f8; }
+    .routing-stat strong { display: block; color: #842029; font-size: 1.35rem; }
+    .routing-table th { white-space: nowrap; font-size: .8rem; text-transform: uppercase; color: #6c757d; }
+    .routing-table td { vertical-align: middle; }
+    .routing-table .form-select, .routing-table .form-control { min-width: 125px; }
+    .international-badge { font-size: .7rem; }
+</style>
 <h2 class="mb-4"><i class="bi bi-geo-alt text-danger me-2"></i> Router: Plotting & Rekomendasi Visit Sales</h2>
 
-<div class="row">
-    <!-- Form Plot Route & Recommendations -->
-    <div class="col-md-6">
-        <div class="card shadow-sm p-3 mb-4">
-            <h5>1. Pilih Toko untuk Di-routing</h5>
-            <form action="/routing" method="GET" class="mb-3">
-                <div class="input-group">
-                    <select name="selected_lead_id" class="form-select" onchange="this.form.submit()">
-                        <option value="">-- Pilih Leads Toko --</option>
-                        {% for l in leads %}
-                        <option value="{{ l.id }}" {% if selected_lead and selected_lead.id == l.id %}selected{% endif %}>
-                            {{ l.store_name }} (Blok {{ l.block }}, Lt {{ l.floor }}{% if l.los %}, Los {{ l.los }}{% endif %})
-                        </option>
-                        {% endfor %}
-                    </select>
-                    <button class="btn btn-outline-secondary" type="submit">Pilih</button>
-                </div>
-            </form>
-
-            {% if selected_lead %}
-            <div class="alert alert-info">
-                <strong>Detail Toko Terpilih:</strong><br>
-                Nama: <b>{{ selected_lead.store_name }}</b><br>
-                Lokasi: Blok {{ selected_lead.block }}, Lantai {{ selected_lead.floor }}, Los {{ selected_lead.los or '-' }}<br>
-                Jumlah Visit Sebelumnya: <span class="badge bg-secondary">{{ selected_lead.visit_count }} kali</span>
-            </div>
-
-            <form action="/routing/assign" method="POST">
-                <input type="hidden" name="lead_id" value="{{ selected_lead.id }}">
-                <div class="mb-3">
-                    <label class="form-label">Assign Sales</label>
-                    <select name="sales_id" class="form-select" required>
-                        {% for s in sales_users %}
-                        <option value="{{ s.id }}">{{ s.full_name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Tanggal Visit</label>
-                    <input type="date" name="scheduled_date" class="form-control" required>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Catatan Router</label>
-                    <textarea name="notes" class="form-control" rows="2" placeholder="Sampaikan instruksi penawaran..."></textarea>
-                </div>
-                <button type="submit" class="btn btn-danger w-100"><i class="bi bi-calendar-plus me-1"></i> Plot Visit Ke Sales</button>
-            </form>
-            {% endif %}
-        </div>
+<div class="card shadow-sm p-3 mb-4 routing-summary">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3"><strong>Target Routing Bulanan</strong><div class="text-muted small">Tentukan target leads per bulan.</div></div>
+        <form action="/routing" method="get" class="col-md-3"><label class="form-label">Bulan Routing</label><input type="month" name="month" value="{{ target_month }}" class="form-control" onchange="this.form.submit()"></form>
+        <form action="/routing/target" method="post" class="col-md-3"><input type="hidden" name="month" value="{{ target_month }}"><label class="form-label">Target Leads</label><div class="input-group"><input type="number" name="target_count" min="0" value="{{ routing_target }}" class="form-control" required><button class="btn btn-danger" type="submit">Simpan</button></div></form>
+        <div class="col-md-3"><div class="routing-stat"><small class="text-muted">Progress {{ target_month }}</small><strong>{{ routed_this_month }} / {{ routing_target }}</strong><div class="progress" style="height: 8px"><div class="progress-bar bg-danger routing-progress-bar" data-progress="{{ routing_progress }}"></div></div></div></div>
     </div>
+</div>
 
-    <!-- Recommendation Box -->
-    <div class="col-md-6">
+<form action="/routing/assign-bulk" method="post">
+    <div class="card shadow-sm p-3 mb-4">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3"><div><h5 class="mb-1">Pilih Leads untuk Routing</h5><small class="text-muted">Centang satu atau beberapa lead, pilih sales dan tanggal visit pada baris masing-masing.</small></div><button class="btn btn-danger" type="submit"><i class="bi bi-calendar-plus me-1"></i> Plot Lead Terpilih</button></div>
+        <div class="table-responsive"><table class="table table-hover routing-table mb-0"><thead><tr><th>Pilih</th><th>Toko</th><th>Lokasi</th><th>International</th><th>Domestik</th><th>Tonase/Bulan</th><th>Sales</th><th>Tanggal Visit</th></tr></thead><tbody>
+        {% for lead in leads %}{% set monthly = monthly_tonnage(lead) %}
+        <tr><td><input class="form-check-input lead-checkbox" type="checkbox" name="lead_id" value="{{ lead.id }}"></td><td><strong>{{ lead.store_name }}</strong><br><small class="text-muted">{{ lead.pic_name }} · {{ lead.phone_number }}</small></td><td>Blok {{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }}<br><small>No. {{ lead.nomor or '-' }}</small></td><td>{% if lead.shipment_type in ['International', 'Keduanya'] %}<span class="badge bg-primary">Iya</span>{% else %}<span class="text-muted">Tidak</span>{% endif %}</td><td>{% if lead.shipment_type in ['Domestik', 'Keduanya'] or not lead.shipment_type %}<span class="badge bg-success">Iya</span>{% else %}<span class="text-muted">Tidak</span>{% endif %}</td><td><strong>{{ '%.2f'|format(monthly) }} KG</strong><br><small>{{ lead.tonnage_potential_kg or 0 }} KG / {{ lead.tonnage_period or 'Bulan' }}</small></td><td><select name="sales_id_{{ lead.id }}" class="form-select form-select-sm"><option value="">Pilih Sales</option>{% for s in sales_users %}<option value="{{ s.id }}">{{ s.name or s.full_name or s.username }}</option>{% endfor %}</select></td><td><input type="date" name="scheduled_date_{{ lead.id }}" class="form-control form-control-sm"></td></tr>
+        {% else %}<tr><td colspan="8" class="text-center text-muted py-4">Belum ada leads untuk dirouting.</td></tr>{% endfor %}
+        </tbody></table></div>
+        <div class="row mt-3 align-items-end"><div class="col-md-9"><label class="form-label">Catatan untuk Sales</label><input type="text" name="notes" class="form-control" placeholder="Instruksi umum untuk lead yang dipilih"></div><div class="col-md-3 text-md-end mt-2 mt-md-0"><button class="btn btn-danger" type="submit"><i class="bi bi-check2-square me-1"></i> Simpan Routing</button></div></div>
+    </div>
+</form>
+
+<div class="row">
+    <div class="col-12">
         <div class="card shadow-sm p-3 mb-4">
-            <h5><i class="bi bi-stars text-warning me-1"></i> Rekomendasi Toko Sekitar (Cluster Sama)</h5>
-            <p class="text-muted small">Rekomendasi otomatis berdasarkan Blok, Lantai, dan Los yang berdekatan.</p>
+            <h5><i class="bi bi-stars text-warning me-1"></i> Rekomendasi Prioritas Routing</h5>
+            <p class="text-muted small">Prioritas global: riwayat international dan potensi bulanan terbesar. Jika memakai lead acuan, blok/lantai/los yang sama mendapat skor tambahan.</p>
             
             {% if recommendations %}
             <div class="list-group">
@@ -65,7 +44,8 @@
                 <a href="/routing?selected_lead_id={{ r.id }}" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
                     <div>
                         <strong class="text-danger">{{ r.store_name }}</strong><br>
-                        <small>Blok {{ r.block }} / Lt. {{ r.floor }} / Los {{ r.los or '-' }}</small>
+                        <small>Blok {{ r.block }} / Lt. {{ r.floor }} / Los {{ r.los or '-' }} · {{ '%.2f'|format(r.monthly_tonnage_kg) }} KG/bulan</small><br>
+                        {% if r.has_international %}<span class="badge bg-primary">International</span>{% endif %}
                     </div>
                     <span class="badge bg-outline-primary">Plot Toko Ini</span>
                 </a>
@@ -74,10 +54,15 @@
             {% else %}
             <div class="text-center py-4 text-muted">
                 <i class="bi bi-info-circle fs-3"></i><br>
-                Pilih toko terlebih dahulu untuk menampilkan rekomendasi toko terdekat.
+                Belum ada lead yang dapat direkomendasikan.
             </div>
             {% endif %}
         </div>
     </div>
 </div>
+<script>
+    document.querySelectorAll('.routing-progress-bar').forEach((bar) => {
+        bar.style.width = `${bar.dataset.progress}%`;
+    });
+</script>
 {% endblock %}
