@@ -11,6 +11,7 @@ from urllib.parse import quote
 import requests
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from dotenv import load_dotenv
 from starlette.middleware.sessions import SessionMiddleware
@@ -23,13 +24,14 @@ except ModuleNotFoundError:
 load_dotenv()
 app = FastAPI(title="Lion Parcel Tanah Abang Leads")
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET") or os.getenv("SECRET_KEY", "dev-only-change-me"))
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
-EXPEDITIONS = ["Lion Parcel", "Rayspeed Asia", "TLX", "JNT", "JNE", "Sicepat", "Lainnya"]
+EXPEDITIONS = ["Lion Parcel", "Rayspeed Asia", "TLX", "JNT", "JNE", "Sicepat", "POS Indonesia", "Lainnya"]
 BLOCKS = ["A", "B", "C", "D", "E", "F", "G", "PGMTA", "PMTA", "JMTA"]
 FLOORS = ["B3", "B2", "B1", "SLG", "LG", "G", "1", "2", "3", "3A", "4", "5", "6", "7", "8", "9", "10", "11", "12", "12A", "R"]
-LOS_OPTIONS = list("ABCDEFGHIJ")
-PIC_POSITIONS = ["Owner", "Admin Toko", "Lainnya"]
+LOS_OPTIONS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "FNO"]
+PIC_POSITIONS = ["Owner", "Karyawan Toko", "Lainnya"]
 ROLES = ["data_entry", "admin", "router", "sales"]
 DEMO_USERS = [
     {"id": "demo-admin", "name": "Admin Tanah Abang", "email": "admin@lionparcel.local", "role": "admin", "password": "admin123"},
@@ -110,10 +112,11 @@ class Store:
         return self._request("GET", "visit_routes", params={"select": "*,leads(*),users!visit_routes_sales_id_fkey(id,username,full_name)", "order": "scheduled_date.desc"})
 
     def create_lead(self, data: dict) -> dict:
-        data.update({"id": secrets.token_urlsafe(10), "created_at": now_iso(), "updated_at": now_iso(), "visit_count": 0, "routing_status": "Belum diplot"})
         if self.demo:
+            data.update({"id": secrets.token_urlsafe(10), "created_at": now_iso(), "visit_count": 0, "routing_status": "Belum diplot"})
             DEMO_LEADS.insert(0, data)
             return data
+        data.update({"created_at": now_iso(), "visit_count": 0})
         return self._request("POST", "leads", body=data)[0]
 
     def assign_route(self, lead_id: str, sales_id: str, router_id: str, scheduled_date: str, notes: str = "") -> None:
@@ -131,7 +134,7 @@ class Store:
             if lead:
                 lead.update(data)
             return
-        self._request("PATCH", "leads", params={"id": f"eq.{quote(lead_id)}"}, body={**data, "updated_at": now_iso()})
+        self._request("PATCH", "leads", params={"id": f"eq.{quote(lead_id)}"}, body=data)
 
     def save_user(self, data: dict, user_id: str | None = None) -> None:
         password = data.pop("password", "")
@@ -276,6 +279,14 @@ async def create_lead(request: Request, store_name: str = Form(...), block: str 
         store.create_lead(build_lead_data(user, store_name=store_name, block=block, floor=floor, los=los, nomor=nomor, pic_name=pic_name, pic_position=pic_position, phone_number=phone_number, shipment_type=shipment_type, current_courier=current_courier, top_country=top_country, top_city=top_city, tonnage_potential_kg=tonnage_potential_kg, tonnage_period=tonnage_period))
     except ValueError as exc:
         return RedirectResponse(f"/leads/new?error={quote(str(exc))}", status_code=303)
+    except requests.HTTPError as exc:
+        detail = "Supabase menolak data. Pastikan kolom tabel leads sudah sesuai, termasuk nomor."
+        if exc.response is not None and exc.response.text:
+            print(f"Create lead Supabase error: {exc.response.text}")
+        return RedirectResponse(f"/leads/new?error={quote(detail)}", status_code=303)
+    except requests.RequestException as exc:
+        print(f"Create lead connection error: {exc}")
+        return RedirectResponse(f"/leads/new?error={quote('Tidak dapat terhubung ke Supabase. Coba lagi.')}", status_code=303)
     return RedirectResponse("/leads?created=1", status_code=303)
 
 
@@ -314,6 +325,14 @@ async def upload_leads(request: Request, file: UploadFile = File(...)):
             store.create_lead(build_lead_data(user, store_name=str(row.get("store_name", "")), block=str(row.get("block", "")), floor=str(row.get("floor", "")), los=str(row.get("los", "")), nomor=str(row.get("nomor", "")), pic_name=str(row.get("pic_name", "")), pic_position=str(row.get("pic_position", "")), phone_number=str(row.get("phone_number", "")), shipment_type=str(row.get("shipment_type", "Domestik")), current_courier=str(row.get("current_courier", "")), top_country=str(row.get("top_country", "")), top_city=str(row.get("top_city", "")), tonnage_potential_kg=float(row.get("tonnage_potential_kg") or 0), tonnage_period=str(row.get("tonnage_period", "Bulan"))))
     except (ValueError, TypeError, KeyError, UnicodeDecodeError) as exc:
         return RedirectResponse(f"/leads/new?error={quote(f'Upload gagal: {exc}')}", status_code=303)
+    except requests.HTTPError as exc:
+        detail = "Supabase menolak salah satu baris upload. Periksa nama kolom dan tipe datanya."
+        if exc.response is not None and exc.response.text:
+            print(f"Bulk lead Supabase error: {exc.response.text}")
+        return RedirectResponse(f"/leads/new?error={quote(detail)}", status_code=303)
+    except requests.RequestException as exc:
+        print(f"Bulk lead connection error: {exc}")
+        return RedirectResponse(f"/leads/new?error={quote('Tidak dapat terhubung ke Supabase saat upload.')}", status_code=303)
     return RedirectResponse(f"/leads/new?success={quote(f'{len(rows)} leads berhasil diupload')}", status_code=303)
 
 

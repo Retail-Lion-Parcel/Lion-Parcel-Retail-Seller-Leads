@@ -3,10 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <title>Login - Lion Parcel Tanah Abang</title>
+    <link rel="icon" type="image/png" href="/static/images/lion-parcel-icon-white.png">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background: linear-gradient(135deg, #d32f2f, #b71c1c); min-height: 100vh; display: flex; align-items: center; }
         .card-login { border-radius: 15px; border: none; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+        .login-logo { width: 100%; max-width: 270px; height: auto; object-fit: contain; }
     </style>
 </head>
 <body>
@@ -15,7 +17,7 @@
         <div class="col-md-4">
             <div class="card card-login p-4">
                 <div class="text-center mb-4">
-                    <h3 class="fw-bold text-danger">LION PARCEL</h3>
+                    <img class="login-logo" src="/static/images/lion-parcel-red.png" alt="Lion Parcel">
                     <p class="text-muted">Leads & Routing System Tanah Abang</p>
                 </div>
                 {% if error %}

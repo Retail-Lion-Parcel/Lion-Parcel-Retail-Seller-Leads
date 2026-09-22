@@ -1,6 +1,26 @@
 {% extends "base.html" %}
 {% block content %}
+<style>
+    .lead-form-card { border: 0; border-radius: 12px; }
+    .lead-form .form-section { border-top: 1px solid #e9ecef; margin-top: 1.5rem; padding-top: 1.25rem; }
+    .lead-form .form-section:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+    .lead-form .section-title { color: #842029; font-size: 1rem; font-weight: 700; margin-bottom: 1rem; }
+    .lead-form .form-label { font-size: .9rem; font-weight: 600; margin-bottom: .4rem; }
+    .lead-form .form-control, .lead-form .form-select { min-height: 42px; }
+    .lead-form .form-text { font-size: .78rem; }
+    .lead-form .submit-row { border-top: 1px solid #e9ecef; margin-top: 1.5rem; padding-top: 1.25rem; }
+    .bulk-upload-card { border: 1px solid #e9ecef; border-left: 4px solid #d32f2f; border-radius: 12px; }
+    .bulk-upload-card .bulk-title { color: #842029; font-size: 1.05rem; font-weight: 700; }
+    .bulk-upload-card .bulk-help { font-size: .85rem; }
+    .bulk-upload-card .form-label { font-size: .9rem; font-weight: 600; }
+    .bulk-upload-card .form-control { min-height: 42px; }
+    .bulk-actions { display: flex; justify-content: flex-end; }
+    .bulk-action-grid { display: grid; grid-template-columns: repeat(2, minmax(170px, 220px)); gap: .75rem; width: 100%; max-width: 460px; }
+    .bulk-action-grid .btn { min-height: 42px; display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; }
+    @media (max-width: 575.98px) { .bulk-actions { justify-content: stretch; } .bulk-action-grid { grid-template-columns: 1fr; max-width: none; } }
+</style>
 <h2 class="mb-4"><i class="bi bi-pencil-square text-danger me-2"></i> Input Pendataan Leads Tanah Abang</h2>
+<p class="text-muted small"><span class="text-danger fw-bold">*</span> Wajib diisi</p>
 
 {% if success %}
 <div class="alert alert-success alert-dismissible fade show" role="alert">
@@ -10,26 +30,38 @@
 {% endif %}
 {% if error %}<div class="alert alert-danger">{{ error }}</div>{% endif %}
 
-<div class="card shadow-sm p-4 mb-4">
-    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <div><h5 class="mb-1">Upload Data Bulky</h5><small class="text-muted">Gunakan file CSV atau XLSX dengan kolom sesuai template.</small></div>
-        <a href="/leads/template" class="btn btn-outline-danger"><i class="bi bi-download me-1"></i> Download Template</a>
+<div class="card shadow-sm p-4 mb-4 bulk-upload-card">
+    <div class="mb-3">
+        <div class="bulk-title"><i class="bi bi-cloud-arrow-up me-2"></i>Upload Data Bulky</div>
+        <div class="bulk-help text-muted mt-1">Upload banyak leads sekaligus menggunakan file CSV atau XLSX sesuai template.</div>
     </div>
-    <form action="/leads/upload" method="POST" enctype="multipart/form-data" class="row g-2 mt-2">
-        <div class="col-md-9"><input type="file" name="file" class="form-control" accept=".csv,.xlsx" required></div>
-        <div class="col-md-3"><button type="submit" class="btn btn-danger w-100"><i class="bi bi-upload me-1"></i> Upload Data</button></div>
+    <form action="/leads/upload" method="POST" enctype="multipart/form-data" class="row g-3 align-items-end">
+        <div class="col-12">
+            <label class="form-label">File Data <span class="text-danger" aria-hidden="true">*</span></label>
+            <input type="file" name="file" class="form-control" accept=".csv,.xlsx" required>
+            <div class="form-text">Format yang didukung: .csv dan .xlsx</div>
+        </div>
+        <div class="col-12 bulk-actions">
+            <div class="bulk-action-grid">
+                <a href="/leads/template" class="btn btn-outline-danger"><i class="bi bi-download me-1"></i> Download Template</a>
+                <button type="submit" class="btn btn-danger"><i class="bi bi-upload me-1"></i> Upload Data</button>
+            </div>
+        </div>
     </form>
 </div>
 
 <div class="card shadow-sm p-4">
-    <form action="/leads" method="POST">
+    <form action="/leads" method="POST" class="lead-form">
         <div class="row g-3">
+            <div class="col-12 form-section">
+                <div class="section-title"><i class="bi bi-shop me-2"></i>Informasi Toko</div>
+            </div>
             <div class="col-md-4">
                 <label class="form-label">Tanggal Submit</label>
                 <input type="text" class="form-control" value="Otomatis saat tombol Simpan ditekan" disabled>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Nama Toko</label>
+                <label class="form-label">Nama Toko <span class="text-danger" aria-hidden="true">*</span></label>
                 <input type="text" name="store_name" class="form-control" placeholder="Contoh: Toko Jaya Busana" required>
             </div>
             <div class="col-md-4">
@@ -37,13 +69,15 @@
                 <input type="text" class="form-control" value="{{ user.name or user.full_name or user.email }}" disabled>
             </div>
 
-            <!-- Cluster Tanah Abang -->
+            <div class="col-12 form-section">
+                <div class="section-title"><i class="bi bi-geo-alt me-2"></i>Lokasi Toko</div>
+            </div>
             <div class="col-md-4">
-                <label class="form-label">Blok</label>
+                <label class="form-label">Blok <span class="text-danger" aria-hidden="true">*</span></label>
                 <select name="block" class="form-select" required><option value="">Pilih Blok</option>{% for item in blocks %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Lantai</label>
+                <label class="form-label">Lantai <span class="text-danger" aria-hidden="true">*</span></label>
                 <select name="floor" class="form-select" required><option value="">Pilih Lantai</option>{% for item in floors %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
             <div class="col-md-4">
@@ -55,23 +89,27 @@
                 <input type="text" name="nomor" class="form-control" placeholder="Contoh: 201-203 atau 201">
             </div>
 
-            <!-- PIC Toko -->
+            <div class="col-12 form-section">
+                <div class="section-title"><i class="bi bi-person me-2"></i>PIC Toko</div>
+            </div>
             <div class="col-md-4">
-                <label class="form-label">Nama PIC Toko</label>
+                <label class="form-label">Nama PIC Toko <span class="text-danger" aria-hidden="true">*</span></label>
                 <input type="text" name="pic_name" class="form-control" required>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Jabatan PIC Toko</label>
+                <label class="form-label">Jabatan PIC Toko <span class="text-danger" aria-hidden="true">*</span></label>
                 <select name="pic_position" class="form-select" required><option value="">Pilih Jabatan</option>{% for item in pic_positions %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Nomor HP / Whatsapp</label>
+                <label class="form-label">Nomor HP / Whatsapp <span class="text-danger" aria-hidden="true">*</span></label>
                 <input type="text" name="phone_number" class="form-control" placeholder="628123456789" required>
             </div>
 
-            <!-- Ekspedisi & Tipe Kiriman -->
+            <div class="col-12 form-section">
+                <div class="section-title"><i class="bi bi-truck me-2"></i>Ekspedisi dan Jenis Kiriman</div>
+            </div>
             <div class="col-md-4">
-                <label class="form-label">Jenis Kiriman</label>
+                <label class="form-label">Jenis Kiriman <span class="text-danger" aria-hidden="true">*</span></label>
                 <select name="shipment_type" class="form-select" required>
                     <option value="Domestik">Domestik</option>
                     <option value="International">International</option>
@@ -80,7 +118,7 @@
                 </select>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Ekspedisi Yang Digunakan Saat Ini</label>
+                <label class="form-label">Ekspedisi Yang Digunakan Saat Ini <span class="text-danger" aria-hidden="true">*</span></label>
                 <select name="current_courier" class="form-select" required>
                     {% for c in couriers %}
                     <option value="{{ c }}">{{ c }}</option>
@@ -96,13 +134,15 @@
                 <input type="text" name="top_city" class="form-control" placeholder="Surabaya / Medan">
             </div>
 
-            <!-- Tonase -->
+            <div class="col-12 form-section">
+                <div class="section-title"><i class="bi bi-bar-chart me-2"></i>Potensi Kiriman</div>
+            </div>
             <div class="col-md-6">
-                <label class="form-label">Potensi Tonase Kiriman (KG)</label>
+                <label class="form-label">Potensi Tonase Kiriman (KG) <span class="text-danger" aria-hidden="true">*</span></label>
                 <input type="number" step="0.01" name="tonnage_potential_kg" class="form-control" placeholder="100.0" required>
             </div>
             <div class="col-md-6">
-                <label class="form-label">Periode Potensi Tonase</label>
+                <label class="form-label">Periode Potensi Tonase <span class="text-danger" aria-hidden="true">*</span></label>
                 <select name="tonnage_period" class="form-select" required>
                     <option value="Hari">Per Hari</option>
                     <option value="Bulan" selected>Per Bulan</option>
@@ -110,7 +150,7 @@
                 </select>
             </div>
 
-            <div class="col-12 mt-4 text-end">
+            <div class="col-12 text-end submit-row">
                 <button type="submit" class="btn btn-danger btn-lg px-5"><i class="bi bi-save me-2"></i> Simpan Data Leads</button>
             </div>
         </div>

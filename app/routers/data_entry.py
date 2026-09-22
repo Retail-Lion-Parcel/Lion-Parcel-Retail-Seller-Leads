@@ -7,7 +7,7 @@ from app.database import get_supabase
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
-COURIER_OPTIONS = ["Lion Parcel", "Rayspeed Asia", "TLX", "JNT", "JNE", "Sicepat", "Lain-lain"]
+COURIER_OPTIONS = ["Lion Parcel", "Rayspeed Asia", "TLX", "JNT", "JNE", "Sicepat", "POS Indonesia", "Lain-lain"]
 
 @router.get("/data-entry/new", response_class=HTMLResponse)
 async def form_new_lead(request: Request):
