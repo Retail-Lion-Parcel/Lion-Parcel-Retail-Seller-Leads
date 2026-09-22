@@ -8,6 +8,13 @@
     .lead-form .form-label { font-size: .9rem; font-weight: 600; margin-bottom: .4rem; }
     .lead-form .form-control, .lead-form .form-select { min-height: 42px; }
     .lead-form .form-text { font-size: .78rem; }
+    .multi-select-search { margin-bottom: .5rem; }
+    .multi-dropdown { width: 100%; }
+    .multi-dropdown .dropdown-toggle { width: 100%; min-height: 42px; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+    .multi-dropdown .dropdown-menu { width: min(330px, 90vw); max-height: 280px; overflow-y: auto; padding: .65rem; }
+    .multi-dropdown .dropdown-menu label { display: block; cursor: pointer; border-radius: .3rem; padding: .35rem .45rem; font-size: .85rem; }
+    .multi-dropdown .dropdown-menu label:hover { background: #fff0f1; }
+    .multi-dropdown .dropdown-menu input { margin-right: .45rem; accent-color: #dc3545; }
     .lead-form .submit-row { border-top: 1px solid #e9ecef; margin-top: 1.5rem; padding-top: 1.25rem; }
     .bulk-upload-card { border: 1px solid #e9ecef; border-left: 4px solid #d32f2f; border-radius: 12px; }
     .bulk-upload-card .bulk-title { color: #842029; font-size: 1.05rem; font-weight: 700; }
@@ -37,7 +44,7 @@
     </div>
     <form action="/leads/upload" method="POST" enctype="multipart/form-data" class="row g-3 align-items-end">
         <div class="col-12">
-            <label class="form-label">File Data <span class="text-danger" aria-hidden="true">*</span></label>
+            <label class="form-label">File Data</label>
             <input type="file" name="file" class="form-control" accept=".csv,.xlsx" required>
             <div class="form-text">Format yang didukung: .csv dan .xlsx</div>
         </div>
@@ -81,12 +88,12 @@
                 <select name="floor" class="form-select" required><option value="">Pilih Lantai</option>{% for item in floors %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Los (Jika Ada)</label>
-                <select name="los" class="form-select"><option value="">Pilih Los</option>{% for item in los_options %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
+                <label class="form-label">Los <span class="text-danger" aria-hidden="true">*</span></label>
+                <select name="los" class="form-select" required><option value="">Pilih Los</option>{% for item in los_options %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Nomor</label>
-                <input type="text" name="nomor" class="form-control" placeholder="Contoh: 201-203 atau 201">
+                <label class="form-label">Nomor <span class="text-danger" aria-hidden="true">*</span></label>
+                <input type="text" name="nomor" class="form-control" placeholder="Contoh: 201-203 atau 201" required>
             </div>
 
             <div class="col-12 form-section">
@@ -102,7 +109,7 @@
             </div>
             <div class="col-md-4">
                 <label class="form-label">Nomor HP / Whatsapp <span class="text-danger" aria-hidden="true">*</span></label>
-                <input type="text" name="phone_number" class="form-control" placeholder="628123456789" required>
+                <input type="tel" name="phone_number" class="form-control" placeholder="Contoh: 6282123456789" inputmode="tel" pattern="\+?[1-9][0-9]{7,14}" title="Nomor yang diawali 0 otomatis diubah menjadi 62, contoh 082123456789 menjadi 6282123456789" required>
             </div>
 
             <div class="col-12 form-section">
@@ -111,27 +118,35 @@
             <div class="col-md-4">
                 <label class="form-label">Jenis Kiriman <span class="text-danger" aria-hidden="true">*</span></label>
                 <select name="shipment_type" class="form-select" required>
-                    <option value="Domestik">Domestik</option>
                     <option value="International">International</option>
+                    <option value="Domestik">Domestik</option>
                     <option value="Keduanya">Keduanya</option>
                     <option value="Tidak Sama Sekali">Tidak Sama Sekali</option>
                 </select>
             </div>
             <div class="col-md-4">
                 <label class="form-label">Ekspedisi Yang Digunakan Saat Ini <span class="text-danger" aria-hidden="true">*</span></label>
-                <select name="current_courier" class="form-select" required>
-                    {% for c in couriers %}
-                    <option value="{{ c }}">{{ c }}</option>
-                    {% endfor %}
-                </select>
+                <div class="dropdown multi-dropdown" id="courier-options" data-label="Pilih ekspedisi">
+                    <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">Pilih ekspedisi</button>
+                    <div class="dropdown-menu"><input type="search" class="form-control form-control-sm mb-2 multi-select-search" placeholder="Cari ekspedisi">{% for c in couriers %}<label><input type="checkbox" name="current_courier" value="{{ c }}">{{ c }}</label>{% endfor %}</div>
+                </div>
+                <div class="form-text">Pilih satu atau beberapa ekspedisi.</div>
             </div>
             <div class="col-md-2">
                 <label class="form-label">Negara Terbanyak</label>
-                <input type="text" name="top_country" class="form-control" placeholder="Malaysia / Singapore">
+                <div class="dropdown multi-dropdown" id="country-options" data-label="Pilih negara">
+                    <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">Pilih negara</button>
+                    <div class="dropdown-menu"><input type="search" class="form-control form-control-sm mb-2 multi-select-search" placeholder="Cari negara">{% for item in top_countries %}<label><input type="checkbox" name="top_country" value="{{ item }}">{{ item }}</label>{% endfor %}</div>
+                </div>
+                <div class="form-text">Boleh memilih beberapa negara.</div>
             </div>
             <div class="col-md-2">
-                <label class="form-label">Kota Terbanyak</label>
-                <input type="text" name="top_city" class="form-control" placeholder="Surabaya / Medan">
+                <label class="form-label">Kota Indonesia Terbanyak</label>
+                <div class="dropdown multi-dropdown" id="city-options" data-label="Pilih kota Indonesia">
+                    <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">Pilih kota Indonesia</button>
+                    <div class="dropdown-menu"><input type="search" class="form-control form-control-sm mb-2 multi-select-search" placeholder="Cari kota Indonesia">{% for item in top_cities %}<label><input type="checkbox" name="top_city" value="{{ item }}">{{ item }}</label>{% endfor %}</div>
+                </div>
+                <div class="form-text">Boleh memilih beberapa kota.</div>
             </div>
 
             <div class="col-12 form-section">
@@ -156,4 +171,41 @@
         </div>
     </form>
 </div>
+<script>
+    document.querySelectorAll('.multi-dropdown').forEach((dropdown) => {
+        const button = dropdown.querySelector('.dropdown-toggle');
+        const searchInput = dropdown.querySelector('.multi-select-search');
+        const checkboxes = dropdown.querySelectorAll('input[type="checkbox"]');
+        const updateLabel = () => {
+            const selected = Array.from(checkboxes).filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value);
+            button.textContent = selected.length ? `${selected.length} dipilih: ${selected.slice(0, 2).join(', ')}${selected.length > 2 ? '...' : ''}` : dropdown.dataset.label;
+        };
+        checkboxes.forEach((checkbox) => checkbox.addEventListener('change', updateLabel));
+        searchInput.addEventListener('input', () => {
+            const query = searchInput.value.toLowerCase();
+            dropdown.querySelectorAll('label').forEach((item) => {
+                item.hidden = query && !item.textContent.toLowerCase().includes(query);
+            });
+        });
+    });
+    const leadForm = document.querySelector('.lead-form');
+    if (leadForm) {
+        leadForm.addEventListener('submit', (event) => {
+            const courierGroup = document.getElementById('courier-options');
+            if (!courierGroup.querySelector('input:checked')) {
+                event.preventDefault();
+                alert('Pilih minimal satu ekspedisi.');
+                courierGroup.querySelector('input[type="checkbox"]').focus();
+            }
+        });
+    }
+    const phoneInput = document.querySelector('input[name="phone_number"]');
+    if (phoneInput) {
+        phoneInput.addEventListener('input', () => {
+            const value = phoneInput.value.replace(/[\s().-]/g, '');
+            if (value.startsWith('0')) phoneInput.value = `62${value.slice(1)}`;
+            if (phoneInput.value.startsWith('+')) phoneInput.value = phoneInput.value.slice(1);
+        });
+    }
+</script>
 {% endblock %}

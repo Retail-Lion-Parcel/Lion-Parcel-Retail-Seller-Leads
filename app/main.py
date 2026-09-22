@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import os
+import re
 import secrets
 from datetime import datetime, timezone
 from typing import Any
@@ -27,12 +28,14 @@ app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET") or 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
-EXPEDITIONS = ["Lion Parcel", "Rayspeed Asia", "TLX", "JNT", "JNE", "Sicepat", "POS Indonesia", "Lainnya"]
+EXPEDITIONS = ["Lion Parcel", "Rayspeed Asia", "TLX", "J&T Express", "J&T Cargo", "JNE", "Sicepat", "POS Indonesia", "TIKI", "Ninja Xpress", "AnterAja", "ID Express", "Lainnya", "Tidak Ada"]
 BLOCKS = ["A", "B", "C", "D", "E", "F", "G", "PGMTA", "PMTA", "JMTA"]
 FLOORS = ["B3", "B2", "B1", "SLG", "LG", "G", "1", "2", "3", "3A", "4", "5", "6", "7", "8", "9", "10", "11", "12", "12A", "R"]
 LOS_OPTIONS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "FNO"]
 PIC_POSITIONS = ["Owner", "Karyawan Toko", "Lainnya"]
-ROLES = ["data_entry", "admin", "router", "sales"]
+TOP_COUNTRIES = ["Indonesia", "Malaysia Timur", "Malaysia Barat", "Singapore", "Thailand", "Vietnam", "Philippines", "Brunei", "China", "Hong Kong", "Taiwan", "South Korea", "Japan", "Australia", "United States", "United Kingdom", "Lainnya"]
+TOP_CITIES = ["Jakarta", "Bandung", "Surabaya", "Medan", "Semarang", "Yogyakarta", "Makassar", "Denpasar", "Palembang", "Banjarmasin", "Pontianak", "Balikpapan", "Padang", "Pekanbaru", "Bandar Lampung", "Malang", "Solo", "Bogor", "Depok", "Tangerang", "Bekasi", "Serang", "Cirebon", "Tasikmalaya", "Purwakarta", "Sukabumi", "Mataram", "Kupang", "Manado", "Palu", "Kendari", "Ambon", "Jayapura", "Samarinda", "Banda Aceh", "Lainnya"]
+ROLES = ["Data Entry", "Admin", "Router", "Sales"]
 DEMO_USERS = [
     {"id": "demo-admin", "name": "Admin Tanah Abang", "email": "admin@lionparcel.local", "role": "admin", "password": "admin123"},
     {"id": "demo-entry", "name": "Data Entry", "email": "entry@lionparcel.local", "role": "data_entry", "password": "entry123"},
@@ -192,7 +195,7 @@ def can(user: dict | None, *roles: str) -> bool:
 
 
 def lead_form_context(**extra: Any) -> dict[str, Any]:
-    return {"couriers": EXPEDITIONS, "blocks": BLOCKS, "floors": FLOORS, "los_options": LOS_OPTIONS, "pic_positions": PIC_POSITIONS, **extra}
+    return {"couriers": EXPEDITIONS, "blocks": BLOCKS, "floors": FLOORS, "los_options": LOS_OPTIONS, "pic_positions": PIC_POSITIONS, "top_countries": TOP_COUNTRIES, "top_cities": TOP_CITIES, **extra}
 
 
 def normalise_choice(value: str, choices: list[str], field: str, required: bool = True) -> str | None:
@@ -204,24 +207,59 @@ def normalise_choice(value: str, choices: list[str], field: str, required: bool 
     return value
 
 
-def build_lead_data(user: dict, *, store_name: str, block: str, floor: str, los: str, nomor: str, pic_name: str, pic_position: str, phone_number: str, shipment_type: str, current_courier: str, top_country: str, top_city: str, tonnage_potential_kg: float, tonnage_period: str) -> dict:
+def normalise_phone_number(value: str) -> str:
+    phone = re.sub(r"[\s().-]", "", value.strip())
+    if phone.startswith("+"):
+        phone = phone[1:]
+    if phone.startswith("0"):
+        phone = "62" + phone[1:]
+    if not re.fullmatch(r"\+?[1-9][0-9]{7,14}", phone):
+        raise ValueError("Nomor HP/WhatsApp tidak valid. Contoh: 082123456789 otomatis menjadi 6282123456789")
+    return phone
+
+
+def required_text(value: str, field: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError(f"{field} wajib diisi")
+    return value
+
+
+def selection_text(value: str | list[str], field: str, required: bool = True) -> str:
+    values = [value] if isinstance(value, str) else value
+    cleaned = [item.strip() for item in values if item and item.strip()]
+    if not cleaned and required:
+        raise ValueError(f"{field} wajib diisi")
+    return ", ".join(dict.fromkeys(cleaned))
+
+
+def normalise_bulk_value(value: Any, field: str) -> str:
+    text = "" if value is None else str(value).strip()
+    if field == "pic_position" and text.lower() == "karyawan":
+        return "Karyawan Toko"
+    if field == "tonnage_period":
+        return {"Per Hari": "Hari", "Per Bulan": "Bulan", "Per Tahun": "Tahun"}.get(text, text)
+    return text
+
+
+def build_lead_data(user: dict, *, store_name: str, block: str, floor: str, los: str, nomor: str, pic_name: str, pic_position: str, phone_number: str, shipment_type: str, current_courier: str | list[str], top_country: str | list[str], top_city: str | list[str], tonnage_potential_kg: float, tonnage_period: str) -> dict:
     return {
         "visit_timestamp": now_iso(),
         "store_name": store_name.strip(),
         "block": normalise_choice(block, BLOCKS, "block"),
         "floor": normalise_choice(floor, FLOORS, "floor"),
-        "los": normalise_choice(los, LOS_OPTIONS, "los", required=False),
-        "nomor": nomor.strip(),
+        "los": normalise_choice(los, LOS_OPTIONS, "los"),
+        "nomor": required_text(nomor, "Nomor Toko"),
         "pic_name": pic_name.strip(),
         "pic_position": normalise_choice(pic_position, PIC_POSITIONS, "pic_position"),
-        "phone_number": phone_number.strip(),
+        "phone_number": normalise_phone_number(phone_number),
         "data_entry_pic": user.get("name") or user.get("full_name") or user.get("email", ""),
         "shipment_type": shipment_type,
-        "current_courier": current_courier,
-        "top_country": top_country.strip(),
-        "top_city": top_city.strip(),
+        "current_courier": selection_text(current_courier, "Ekspedisi"),
+        "top_country": selection_text(top_country, "Negara Terbanyak", required=False),
+        "top_city": selection_text(top_city, "Kota Terbanyak", required=False),
         "tonnage_potential_kg": tonnage_potential_kg,
-        "tonnage_period": tonnage_period,
+        "tonnage_period": normalise_bulk_value(tonnage_period, "tonnage_period"),
         "created_by": user["id"],
     }
 
@@ -271,7 +309,7 @@ async def lead_form(request: Request):
 
 
 @app.post("/leads")
-async def create_lead(request: Request, store_name: str = Form(...), block: str = Form(...), floor: str = Form(...), los: str = Form(""), nomor: str = Form(""), pic_name: str = Form(...), pic_position: str = Form(...), phone_number: str = Form(...), shipment_type: str = Form(...), current_courier: str = Form(...), top_country: str = Form(""), top_city: str = Form(""), tonnage_potential_kg: float = Form(0), tonnage_period: str = Form("Bulan")):
+async def create_lead(request: Request, store_name: str = Form(...), block: str = Form(...), floor: str = Form(...), los: str = Form(...), nomor: str = Form(...), pic_name: str = Form(...), pic_position: str = Form(...), phone_number: str = Form(...), shipment_type: str = Form(...), current_courier: list[str] = Form(...), top_country: list[str] = Form(...), top_city: list[str] = Form(...), tonnage_potential_kg: float = Form(0), tonnage_period: str = Form("Bulan")):
     user = current_user(request)
     if not can(user, "data_entry", "admin"):
         return RedirectResponse("/leads", status_code=303)
@@ -297,7 +335,7 @@ async def download_lead_template(request: Request):
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["store_name", "block", "floor", "los", "nomor", "pic_name", "pic_position", "phone_number", "shipment_type", "current_courier", "top_country", "top_city", "tonnage_potential_kg", "tonnage_period"])
-    writer.writerow(["Contoh Toko", "A", "1", "A", "201-203", "Nama PIC", "Owner", "08123456789", "Domestik", "JNE", "Indonesia", "Jakarta", "100", "Bulan"])
+    writer.writerow(["Contoh Toko", "A", "1", "A", "201-203", "Nama PIC", "Owner", "628123456789", "Domestik", "JNE", "Indonesia", "Jakarta", "100", "Bulan"])
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=template_leads.csv"})
 
 
@@ -321,12 +359,41 @@ async def upload_leads(request: Request, file: UploadFile = File(...)):
             raise ValueError("File harus berformat CSV atau XLSX")
         if not rows:
             raise ValueError("File tidak memiliki data")
-        for row in rows:
-            store.create_lead(build_lead_data(user, store_name=str(row.get("store_name", "")), block=str(row.get("block", "")), floor=str(row.get("floor", "")), los=str(row.get("los", "")), nomor=str(row.get("nomor", "")), pic_name=str(row.get("pic_name", "")), pic_position=str(row.get("pic_position", "")), phone_number=str(row.get("phone_number", "")), shipment_type=str(row.get("shipment_type", "Domestik")), current_courier=str(row.get("current_courier", "")), top_country=str(row.get("top_country", "")), top_city=str(row.get("top_city", "")), tonnage_potential_kg=float(row.get("tonnage_potential_kg") or 0), tonnage_period=str(row.get("tonnage_period", "Bulan"))))
+        prepared_rows = []
+        for row_number, row in enumerate(rows, start=2):
+            try:
+                prepared_rows.append(build_lead_data(
+                    user,
+                    store_name=normalise_bulk_value(row.get("store_name"), "store_name"),
+                    block=normalise_bulk_value(row.get("block"), "block"),
+                    floor=normalise_bulk_value(row.get("floor"), "floor"),
+                    los=normalise_bulk_value(row.get("los"), "los"),
+                    nomor=normalise_bulk_value(row.get("nomor"), "nomor"),
+                    pic_name=normalise_bulk_value(row.get("pic_name"), "pic_name"),
+                    pic_position=normalise_bulk_value(row.get("pic_position"), "pic_position"),
+                    phone_number=normalise_bulk_value(row.get("phone_number"), "phone_number"),
+                    shipment_type=normalise_bulk_value(row.get("shipment_type", "Domestik"), "shipment_type"),
+                    current_courier=normalise_bulk_value(row.get("current_courier"), "current_courier"),
+                    top_country=normalise_bulk_value(row.get("top_country"), "top_country"),
+                    top_city=normalise_bulk_value(row.get("top_city"), "top_city"),
+                    tonnage_potential_kg=float(row.get("tonnage_potential_kg") or 0),
+                    tonnage_period=normalise_bulk_value(row.get("tonnage_period", "Bulan"), "tonnage_period"),
+                ))
+            except (ValueError, TypeError, KeyError) as exc:
+                raise ValueError(f"baris {row_number}: {exc}") from exc
+        for row_number, lead_data in enumerate(prepared_rows, start=2):
+            try:
+                store.create_lead(lead_data)
+            except requests.HTTPError as exc:
+                response_text = exc.response.text if exc.response is not None else ""
+                print(f"Bulk lead Supabase error pada baris {row_number}: {response_text}")
+                if "22001" in response_text:
+                    raise ValueError(f"baris {row_number}: kolom database terlalu pendek untuk pilihan multi-value. Jalankan supabase_migration_add_nomor.sql di Supabase SQL Editor") from exc
+                raise ValueError(f"baris {row_number}: Supabase menolak data ({response_text[:240]})") from exc
     except (ValueError, TypeError, KeyError, UnicodeDecodeError) as exc:
         return RedirectResponse(f"/leads/new?error={quote(f'Upload gagal: {exc}')}", status_code=303)
     except requests.HTTPError as exc:
-        detail = "Supabase menolak salah satu baris upload. Periksa nama kolom dan tipe datanya."
+        detail = "Supabase menolak data upload. Periksa nama kolom dan tipe datanya."
         if exc.response is not None and exc.response.text:
             print(f"Bulk lead Supabase error: {exc.response.text}")
         return RedirectResponse(f"/leads/new?error={quote(detail)}", status_code=303)
