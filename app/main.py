@@ -34,7 +34,7 @@ BLOCKS = ["A", "B", "C", "D", "E", "F", "G", "PGMTA", "PMTA", "JMTA"]
 FLOORS = ["B3", "B2", "B1", "SLG", "LG", "G", "1", "2", "3", "3A", "4", "5", "6", "7", "8", "9", "10", "11", "12", "12A", "R"]
 LOS_OPTIONS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "FNO"]
 PIC_POSITIONS = ["Owner", "Karyawan Toko", "Lainnya"]
-TOP_COUNTRIES = ["Indonesia", "Malaysia Timur", "Malaysia Barat", "Singapore", "Thailand", "Vietnam", "Philippines", "Brunei", "China", "Hong Kong", "Taiwan", "South Korea", "Japan", "Australia", "United States", "United Kingdom", "Lainnya"]
+TOP_COUNTRIES = ["Malaysia", "Singapore", "Thailand", "Vietnam", "Philippines", "Brunei", "China", "Hong Kong", "Taiwan", "South Korea", "Japan", "Australia", "United States", "United Kingdom", "Lainnya"]
 TOP_CITIES = ["Jakarta", "Bandung", "Surabaya", "Medan", "Semarang", "Yogyakarta", "Makassar", "Denpasar", "Palembang", "Banjarmasin", "Pontianak", "Balikpapan", "Padang", "Pekanbaru", "Bandar Lampung", "Malang", "Solo", "Bogor", "Depok", "Tangerang", "Bekasi", "Serang", "Cirebon", "Tasikmalaya", "Purwakarta", "Sukabumi", "Mataram", "Kupang", "Manado", "Palu", "Kendari", "Ambon", "Jayapura", "Samarinda", "Banda Aceh", "Lainnya"]
 ROLE_LABELS = {"data_entry": "Data Entry", "admin": "Admin", "router": "Router", "sales": "Sales"}
 ROLES = list(ROLE_LABELS)
@@ -225,6 +225,7 @@ class Store:
             "routed": routed,
             "visits": sum(int(row.get("visit_count") or 0) for row in rows),
             "weight": sum(float(row.get("tonnage_potential_kg") or 0) for row in rows),
+            "weight_month": sum(monthly_tonnage(row) for row in rows),
             "status_stats": {"Scheduled": routed, "Visited": sum(int(row.get("visit_count") or 0) > 0 for row in rows), "Rescheduled": 0, "Canceled": 0},
             "courier_stats": courier_stats,
         }
@@ -356,7 +357,7 @@ async def dashboard(request: Request):
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
     stats = store.stats()
-    return render(request, "dashboard.html", title="Dashboard", stats=stats, total_leads=stats["total"], total_tonnage_ton=round(stats["weight"] / 1000, 2), status_stats=stats["status_stats"], courier_stats=stats["courier_stats"], recent=store.leads()[:8])
+    return render(request, "dashboard.html", title="Dashboard", stats=stats, total_leads=stats["total"], total_tonnage_ton=round(stats["weight"] / 1000, 2), total_tonnage_month_ton=round(stats["weight_month"] / 1000, 2), leads_routed=stats["routed"], leads_visited=stats["status_stats"]["Visited"], status_stats=stats["status_stats"], courier_stats=stats["courier_stats"], recent=store.leads()[:8])
 
 
 @app.get("/login", response_class=HTMLResponse)
