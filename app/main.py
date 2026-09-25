@@ -657,24 +657,30 @@ async def delete_user(request: Request, user_id: str = Form(...)):
     return RedirectResponse("/users?deleted=1", status_code=303)
 
 
-@app.post("/sync/google-sheets")
-@app.get("/gsheets/sync")
-@app.get("/sync/google-sheets")
-async def sync_google_sheets(request: Request):
+@app.get("/routing/export")
+async def export_routing_csv(request: Request):
     if not can(current_user(request), "admin", "router"):
         return RedirectResponse("/", status_code=303)
-    sheet_id = os.getenv("GOOGLE_SHEET_ID")
-    credentials = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if not sheet_id or not credentials:
-        return RedirectResponse("/routing?sync=missing", status_code=303)
-    try:
-        from google.oauth2.service_account import Credentials
-        from googleapiclient.discovery import build
-        service = build("sheets", "v4", credentials=Credentials.from_service_account_info(json.loads(credentials), scopes=["https://www.googleapis.com/auth/spreadsheets"]))
-        rows = store.leads()
-        header = ["ID", "Timestamp Visit", "Nama Toko", "Blok", "Lantai", "Los", "Nomor", "PIC", "Jabatan", "HP", "PIC Data Entry", "Jenis Kiriman", "Ekspedisi", "Negara", "Kota", "Tonase KG", "Periode", "Status Routing", "Jumlah Visit", "Sales"]
-        values = [header] + [[row.get(key, "") for key in ("id", "visit_timestamp", "store_name", "block", "floor", "los", "nomor", "pic_name", "pic_position", "phone_number", "data_entry_pic", "shipment_type", "current_courier", "top_country", "top_city", "tonnage_potential_kg", "tonnage_period", "routing_status", "visit_count", "sales_id")] for row in rows]
-        service.spreadsheets().values().update(spreadsheetId=sheet_id, range="Leads!A1", valueInputOption="RAW", body={"values": values}).execute()
-        return RedirectResponse("/routing?sync=success", status_code=303)
-    except Exception:
-        return RedirectResponse("/routing?sync=error", status_code=303)
+    routes = store.routes()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Route ID", "Tanggal Visit", "Nama Toko", "Blok", "Lantai", "Los", "Nomor", "PIC", "No HP/WA", "Sales", "Status Visit", "Catatan"])
+    for route in routes:
+        lead = route.get("leads") or {}
+        sales = route.get("users") or {}
+        writer.writerow([
+            route.get("id", ""),
+            route.get("scheduled_date") or "",
+            lead.get("store_name") or "",
+            lead.get("block") or "",
+            lead.get("floor") or "",
+            lead.get("los") or "",
+            lead.get("nomor") or "",
+            lead.get("pic_name") or "",
+            lead.get("phone_number") or "",
+            sales.get("full_name") or sales.get("username") or route.get("sales_id") or "",
+            route.get("visit_status") or "Scheduled",
+            route.get("notes") or "",
+        ])
+    filename = f"data_routing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={filename}"})
