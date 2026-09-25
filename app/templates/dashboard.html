@@ -2,49 +2,55 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-speedometer2 text-danger me-2"></i> Dashboard Monitoring</h2>
+</div>
+
+<!-- Stat Cards Row -->
+<div class="row g-4 mb-4">
     <div class="col-12 col-sm-6 col-lg-3">
-        <div class="card text-white bg-danger h-100 shadow-sm">
-            <div class="card-body">
-                <h5 class="card-title"><i class="bi bi-shop me-1"></i> Total Leads Toko</h5>
-                <h2 class="display-5 fw-bold">{{ total_leads }}</h2>
-                <p class="card-text mb-0">Toko terdata di Tanah Abang</p>
+        <div class="card text-white bg-danger h-100 shadow-sm border-0">
+            <div class="card-body p-4">
+                <h5 class="card-title small text-white mb-2"><i class="bi bi-shop me-1"></i> Total Leads Toko</h5>
+                <h2 class="display-5 fw-bold mb-0">{{ total_leads }}</h2>
+                <p class="card-text mb-0 small opacity-75">Toko terdata di Tanah Abang</p>
             </div>
         </div>
     </div>
     <div class="col-12 col-sm-6 col-lg-3">
-        <div class="card text-white bg-dark h-100 shadow-sm">
-            <div class="card-body">
-                <h5 class="card-title"><i class="bi bi-box-seam me-1"></i> Potensi Tonase / Bulan</h5>
-                <h2 class="display-5 fw-bold">{{ total_tonnage_month_ton }} <small class="fs-5">Ton</small></h2>
-                <p class="card-text mb-0">Estimasi pengiriman per bulan</p>
+        <div class="card text-white bg-dark h-100 shadow-sm border-0">
+            <div class="card-body p-4">
+                <h5 class="card-title small text-white mb-2"><i class="bi bi-box-seam me-1"></i> Potensi Tonase / Bulan</h5>
+                <h2 class="display-5 fw-bold mb-0">{{ total_tonnage_month_ton }} <small class="fs-5">Ton</small></h2>
+                <p class="card-text mb-0 small opacity-75">Estimasi pengiriman per bulan</p>
             </div>
         </div>
     </div>
     <div class="col-12 col-sm-6 col-lg-3">
-        <div class="card text-white bg-primary h-100 shadow-sm">
-            <div class="card-body">
-                <h5 class="card-title"><i class="bi bi-signpost-split me-1"></i> Leads Sudah Dirouting</h5>
-                <h2 class="display-5 fw-bold">{{ leads_routed }}</h2>
-                <p class="card-text mb-0">Toko yang sudah dijadwalkan</p>
+        <div class="card text-white bg-primary h-100 shadow-sm border-0">
+            <div class="card-body p-4">
+                <h5 class="card-title small text-white mb-2"><i class="bi bi-signpost-split me-1"></i> Leads Sudah Dirouting</h5>
+                <h2 class="display-5 fw-bold mb-0">{{ leads_routed }}</h2>
+                <p class="card-text mb-0 small opacity-75">Toko yang sudah dijadwalkan</p>
             </div>
         </div>
     </div>
     <div class="col-12 col-sm-6 col-lg-3">
-        <div class="card text-white bg-success h-100 shadow-sm">
-            <div class="card-body">
-                <h5 class="card-title"><i class="bi bi-check2-circle me-1"></i> Leads Tervisit</h5>
-                <h2 class="display-5 fw-bold">{{ leads_visited }}</h2>
-                <p class="card-text mb-0">Kunjungan selesai</p>
+        <div class="card text-white bg-success h-100 shadow-sm border-0">
+            <div class="card-body p-4">
+                <h5 class="card-title small text-white mb-2"><i class="bi bi-check2-circle me-1"></i> Leads Tervisit</h5>
+                <h2 class="display-5 fw-bold mb-0">{{ leads_visited }}</h2>
+                <p class="card-text mb-0 small opacity-75">Kunjungan selesai</p>
             </div>
         </div>
     </div>
 </div>
 
-<div class="row">
-    <div class="col-md-6">
-        <div class="card shadow-sm p-3">
-            <h5><i class="bi bi-truck me-2"></i> Penggunaan Ekspedisi Pesaing</h5>
-            <hr>
+<!-- Courier Stats Card -->
+<div class="col-12">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-white pb-0">
+            <h5 class="mb-0"><i class="bi bi-truck me-2"></i> Penggunaan Ekspedisi Pesaing</h5>
+        </div>
+        <div class="card-body p-3">
             <ul class="list-group list-group-flush">
                 {% for courier, count in courier_stats.items() %}
                 <li class="list-group-item d-flex justify-content-between align-items-center">
@@ -55,10 +61,15 @@
             </ul>
         </div>
     </div>
-    <div class="col-md-6">
-        <div class="card shadow-sm p-3">
-            <h5><i class="bi bi-pie-chart me-2"></i> Progress Visit Sales</h5>
-            <hr>
+</div>
+
+<!-- Route Status Card -->
+<div class="col-12">
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-white pb-0">
+            <h5 class="mb-0"><i class="bi bi-pie-chart me-2"></i> Progress Visit Sales</h5>
+        </div>
+        <div class="card-body p-3">
             <ul class="list-group list-group-flush">
                 <li class="list-group-item d-flex justify-content-between align-items-center">
                     Scheduled <span class="badge bg-primary">{{ status_stats.Scheduled }}</span>

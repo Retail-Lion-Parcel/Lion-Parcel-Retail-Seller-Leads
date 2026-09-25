@@ -39,7 +39,8 @@ async def save_lead(
     top_country: str = Form(""),
     top_city: str = Form(""),
     tonnage_potential_kg: float = Form(0.0),
-    tonnage_period: str = Form(...)
+    tonnage_period: str = Form(...),
+    commodity: str = Form(...)
 ):
     user = get_current_user(request)
     if not user or user["role"] not in ["data_entry", "admin"]:
@@ -62,6 +63,7 @@ async def save_lead(
         "top_city": top_city,
         "tonnage_potential_kg": tonnage_potential_kg,
         "tonnage_period": tonnage_period,
+        "commodity": commodity,
         "created_by": user["id"]
     }
 
