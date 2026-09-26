@@ -64,19 +64,19 @@
             <div class="col-12 form-section mt-3">
                 <div class="section-title"><i class="bi bi-shop me-2"></i>Informasi Toko</div>
             </div>
-            <div class="col-md-4">
-                <label class="form-label">Tanggal Submit</label>
-                <input type="text" class="form-control" value="Otomatis saat tombol Simpan ditekan" disabled>
-            </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label class="form-label">Nama Toko <span class="text-danger" aria-hidden="true">*</span></label>
                 <input type="text" name="store_name" class="form-control" placeholder="Contoh: Toko Jaya Busana" required>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label class="form-label">Commodity <span class="text-danger" aria-hidden="true">*</span></label>
                 <input type="text" name="commodity" class="form-control" placeholder="Contoh: Pakaian Muslim" required>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
+                <label class="form-label">Tanggal Submit</label>
+                <input type="text" class="form-control" value="Otomatis saat tombol Simpan ditekan" disabled>
+            </div>
+            <div class="col-md-3">
                 <label class="form-label">PIC Data Entry</label>
                 <input type="text" class="form-control" value="{{ user.name or user.full_name or user.username }}" disabled>
             </div>
@@ -84,19 +84,19 @@
             <div class="col-12 form-section">
                 <div class="section-title"><i class="bi bi-geo-alt me-2"></i>Lokasi Toko</div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label class="form-label">Blok <span class="text-danger" aria-hidden="true">*</span></label>
                 <select name="block" class="form-select" required><option value="">Pilih Blok</option>{% for item in blocks %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label class="form-label">Lantai <span class="text-danger" aria-hidden="true">*</span></label>
                 <select name="floor" class="form-select" required><option value="">Pilih Lantai</option>{% for item in floors %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label class="form-label">Los <span class="text-danger" aria-hidden="true">*</span></label>
                 <select name="los" class="form-select" required><option value="">Pilih Los</option>{% for item in los_options %}<option value="{{ item }}">{{ item }}</option>{% endfor %}</select>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <label class="form-label">Nomor <span class="text-danger" aria-hidden="true">*</span></label>
                 <input type="text" name="nomor" class="form-control" placeholder="Contoh: 201-203 atau 201" required>
             </div>

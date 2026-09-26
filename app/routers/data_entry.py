@@ -90,3 +90,14 @@ async def list_leads(request: Request):
         "user": user,
         "leads": res.data or []
     })
+
+@router.post("/data-entry/delete/{lead_id}")
+async def delete_lead(request: Request, lead_id: str):
+    user = get_current_user(request)
+    if not user or user["role"] != "admin":
+        return RedirectResponse(url="/auth/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    supabase = get_supabase()
+    supabase.table("leads").delete().eq("id", lead_id).execute()
+
+    return RedirectResponse(url="/data-entry/list", status_code=status.HTTP_303_SEE_OTHER)
