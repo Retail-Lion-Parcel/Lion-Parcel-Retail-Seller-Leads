@@ -7,10 +7,21 @@
 	.pagination .page-link { color: #b71c1c; }
 	.pagination .active .page-link { background: #d32f2f; border-color: #d32f2f; color: #fff; }
 </style>
-<div class="d-flex justify-content-between align-items-center mb-4">
-	<h2><i class="bi bi-list-stars text-danger me-2"></i> Daftar Leads</h2>
-	{% if user.role in ['data_entry', 'admin'] %}<a href="/leads/new" class="btn btn-danger"><i class="bi bi-plus-circle me-1"></i> Input Lead</a>{% endif %}
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+	<h2 class="mb-0"><i class="bi bi-list-stars text-danger me-2"></i> Daftar Leads</h2>
+	<div class="d-flex gap-2 flex-wrap">
+		{% if user.role == 'admin' %}
+		<a href="/leads/export?search={{ search | urlencode }}&block={{ block | urlencode }}&floor={{ floor | urlencode }}&los={{ los | urlencode }}&expedition={{ expedition | urlencode }}&sort_by={{ sort_by | urlencode }}" class="btn btn-outline-danger"><i class="bi bi-file-earmark-spreadsheet me-1"></i> Download CSV</a>
+		{% endif %}
+		{% if user.role in ['data_entry', 'admin'] %}<a href="/leads/new" class="btn btn-danger"><i class="bi bi-plus-circle me-1"></i> Input Lead</a>{% endif %}
+	</div>
 </div>
+
+{% if created %}<div class="alert alert-success alert-dismissible fade show"><i class="bi bi-check-circle me-1"></i> Lead baru berhasil disimpan.<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+{% if updated %}<div class="alert alert-success alert-dismissible fade show"><i class="bi bi-check-circle me-1"></i> Data lead berhasil diperbarui.<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+{% if deleted %}<div class="alert alert-success alert-dismissible fade show"><i class="bi bi-check-circle me-1"></i> Data lead berhasil dihapus.<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+{% if error %}<div class="alert alert-danger alert-dismissible fade show"><i class="bi bi-exclamation-triangle me-1"></i> {{ error }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+
 <form method="get" action="/leads" class="card shadow-sm p-3 mb-4 leads-filter-card">
 	<div class="row g-2 align-items-end">
 		<div class="col-lg-3 col-md-6"><label class="form-label">Cari</label><input class="form-control" name="search" value="{{ search or '' }}" placeholder="Nama toko, PIC, sales"></div>
@@ -23,11 +34,31 @@
 	</div>
 </form>
 <div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
-	<thead><tr><th>Toko</th><th>Lokasi</th><th>Nomor</th><th>PIC</th><th>Ekspedisi</th><th>Shipment Type</th><th>Tonase</th><th>Estimasi / Bulan</th><th>Status</th></tr></thead>
+	<thead><tr><th>Toko</th><th>Lokasi</th><th>Nomor</th><th>PIC</th><th>Ekspedisi</th><th>Shipment Type</th><th>Tonase</th><th>Estimasi / Bulan</th><th>Status</th>{% if user.role in ['data_entry', 'admin'] %}<th class="text-center">Aksi</th>{% endif %}</tr></thead>
 	<tbody>
 	{% for lead in leads %}
-	<tr><td><strong>{{ lead.store_name }}</strong><br><small class="text-muted">{{ format_datetime(lead.visit_timestamp) }}</small></td><td>{{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }}</td><td>{{ lead.nomor or '-' }}</td><td>{{ lead.pic_name }}<br><small>{{ lead.phone_number }}</small><br><small class="text-muted">{{ lead.pic_position or '-' }}</small></td><td>{{ lead.current_courier or '-' }}</td><td><span class="badge {% if lead.shipment_type == 'International' %}bg-primary{% elif lead.shipment_type == 'Domestik' %}bg-success{% elif lead.shipment_type == 'Keduanya' %}bg-warning{% else %}bg-danger{% endif %}">{{ lead.shipment_type or '-' }}</span></td><td>{{ lead.tonnage_potential_kg or 0 }} KG / {{ lead.tonnage_period or 'Bulan' }}</td><td><strong>{{ '%.2f'|format(lead.monthly_tonnage_kg or 0) }} KG</strong><br><small class="text-muted">estimasi bulanan</small></td><td><span class="badge {% if lead.routing_status == 'Sudah diplot' %}bg-success{% else %}bg-secondary{% endif %}">{{ lead.routing_status or 'Belum diplot' }}</span></td></tr>
-	{% else %}<tr><td colspan="8" class="text-center text-muted py-4">Belum ada data leads sesuai filter.</td></tr>{% endfor %}
+	<tr>
+		<td><strong>{{ lead.store_name }}</strong><br><small class="text-muted">{{ format_datetime(lead.visit_timestamp) }}</small></td>
+		<td>{{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }}</td>
+		<td>{{ lead.nomor or '-' }}</td>
+		<td>{{ lead.pic_name }}<br><small>{{ lead.phone_number }}</small><br><small class="text-muted">{{ lead.pic_position or '-' }}</small></td>
+		<td>{{ lead.current_courier or '-' }}</td>
+		<td><span class="badge {% if lead.shipment_type == 'International' %}bg-primary{% elif lead.shipment_type == 'Domestik' %}bg-success{% elif lead.shipment_type == 'Keduanya' %}bg-warning{% else %}bg-danger{% endif %}">{{ lead.shipment_type or '-' }}</span></td>
+		<td>{{ lead.tonnage_potential_kg or 0 }} KG / {{ lead.tonnage_period or 'Bulan' }}</td>
+		<td><strong>{{ '%.2f'|format(lead.monthly_tonnage_kg or 0) }} KG</strong><br><small class="text-muted">estimasi bulanan</small></td>
+		<td><span class="badge {% if lead.routing_status == 'Sudah diplot' %}bg-success{% else %}bg-secondary{% endif %}">{{ lead.routing_status or 'Belum diplot' }}</span></td>
+		{% if user.role in ['data_entry', 'admin'] %}
+		<td class="text-nowrap text-center">
+			<a href="/leads/{{ lead.id }}/edit" class="btn btn-sm btn-outline-primary" title="Edit lead"><i class="bi bi-pencil-square"></i></a>
+			{% if user.role == 'admin' %}
+			<form method="post" action="/leads/{{ lead.id }}/delete" class="d-inline" onsubmit="return confirm('Yakin ingin menghapus data toko \'{{ lead.store_name }}\'? Tindakan ini tidak dapat dibatalkan.');">
+				<button type="submit" class="btn btn-sm btn-outline-danger" title="Hapus lead"><i class="bi bi-trash"></i></button>
+			</form>
+			{% endif %}
+		</td>
+		{% endif %}
+	</tr>
+	{% else %}<tr><td colspan="10" class="text-center text-muted py-4">Belum ada data leads sesuai filter.</td></tr>{% endfor %}
 	</tbody>
 </table></div></div>
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3"><small class="text-muted">Menampilkan {{ leads|length }} dari {{ total }} data</small>{% if total_pages > 1 %}<nav aria-label="Pagination leads"><ul class="pagination pagination-sm mb-0"><li class="page-item {% if page <= 1 %}disabled{% endif %}"><a class="page-link" href="/leads?page={{ page - 1 }}&per_page={{ per_page }}&search={{ search }}&block={{ block }}&floor={{ floor }}&los={{ los }}&expedition={{ expedition }}&sort_by={{ sort_by }}">Sebelumnya</a></li>{% for number in range(1, total_pages + 1) %}<li class="page-item {% if number == page %}active{% endif %}"><a class="page-link" href="/leads?page={{ number }}&per_page={{ per_page }}&search={{ search }}&block={{ block }}&floor={{ floor }}&los={{ los }}&expedition={{ expedition }}&sort_by={{ sort_by }}">{{ number }}</a></li>{% endfor %}<li class="page-item {% if page >= total_pages %}disabled{% endif %}"><a class="page-link" href="/leads?page={{ page + 1 }}&per_page={{ per_page }}&search={{ search }}&block={{ block }}&floor={{ floor }}&los={{ los }}&expedition={{ expedition }}&sort_by={{ sort_by }}">Berikutnya</a></li></ul></nav>{% endif %}</div>

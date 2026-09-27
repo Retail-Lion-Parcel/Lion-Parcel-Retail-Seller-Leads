@@ -24,7 +24,7 @@ except ModuleNotFoundError:
     bcrypt = None
 
 load_dotenv()
-app = FastAPI(title="Lion Parcel Tanah Abang Leads")
+app = FastAPI(title="Lion Parcel Retail Leads & Routing System")
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET") or os.getenv("SECRET_KEY", "dev-only-change-me"))
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
@@ -34,6 +34,8 @@ BLOCKS = ["A", "B", "C", "D", "E", "F", "G", "PGMTA", "PMTA", "JMTA"]
 FLOORS = ["B3", "B2", "B1", "SLG", "LG", "G", "1", "2", "3", "3A", "4", "5", "6", "7", "8", "9", "10", "11", "12", "12A", "R"]
 LOS_OPTIONS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "FNO"]
 PIC_POSITIONS = ["Owner", "Karyawan Toko", "Lainnya"]
+SHIPMENT_TYPES = ["Domestik", "International", "Keduanya"]
+TONNAGE_PERIODS = ["Hari", "Bulan", "Tahun"]
 TOP_COUNTRIES = ["Malaysia", "Singapore", "Thailand", "Vietnam", "Philippines", "Brunei", "China", "Hong Kong", "Taiwan", "South Korea", "Japan", "Australia", "United States", "United Kingdom", "Lainnya"]
 TOP_CITIES = ["Jakarta", "Bandung", "Surabaya", "Medan", "Semarang", "Yogyakarta", "Makassar", "Denpasar", "Palembang", "Banjarmasin", "Pontianak", "Balikpapan", "Padang", "Pekanbaru", "Bandar Lampung", "Malang", "Solo", "Bogor", "Depok", "Tangerang", "Bekasi", "Serang", "Cirebon", "Tasikmalaya", "Purwakarta", "Sukabumi", "Mataram", "Kupang", "Manado", "Palu", "Kendari", "Ambon", "Jayapura", "Samarinda", "Banda Aceh", "Lainnya"]
 ROLE_LABELS = {"data_entry": "Data Entry", "admin": "Admin", "router": "Router", "sales": "Sales"}
@@ -69,6 +71,15 @@ def password_hash(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
+def resolve_active_flag(row: dict) -> bool:
+    """Baca status aktif user dari kolom 'active' atau 'is_active'.
+    Kolom yang bernilai NULL di database (bukan true/false eksplisit) dianggap
+    AKTIF secara default, bukan nonaktif — supaya user lama yang belum pernah
+    disentuh kolom statusnya tidak salah tampil sebagai 'Nonaktif'."""
+    raw_value = row.get("active", row.get("is_active"))
+    return True if raw_value is None else bool(raw_value)
+
+
 class Store:
     def __init__(self) -> None:
         self.url = os.getenv("SUPABASE_URL", "").rstrip("/")
@@ -82,7 +93,7 @@ class Store:
 
     def users(self) -> list[dict]:
         if self.demo:
-            return [{k: v for k, v in user.items() if k != "password"} for user in DEMO_USERS]
+            return [{**{k: v for k, v in user.items() if k != "password"}, "active": resolve_active_flag(user)} for user in DEMO_USERS]
         rows = self._request("GET", "users", params={"select": "*", "order": "created_at"})
         return [self._normalise_user(row) for row in rows]
 
@@ -93,13 +104,22 @@ class Store:
             "name": row.get("name") or row.get("full_name") or row.get("username"),
             "username": row.get("username") or row.get("email"),
             "role": row.get("role"),
-            "active": row.get("active", row.get("is_active", True)),
+            "active": resolve_active_flag(row),
         }
 
-    def authenticate(self, username: str, password: str) -> dict | None:
+    def authenticate(self, username: str, password: str) -> tuple[dict | None, str | None]:
+        """Mengembalikan (user, error_reason).
+        error_reason bernilai None jika login berhasil, atau salah satu dari:
+        - "invalid"  : username/password salah
+        - "inactive" : kredensial benar tapi akun sudah dinonaktifkan
+        """
         if self.demo:
-            user = next((u for u in DEMO_USERS if u["username"].lower() == username.lower() and u["password"] == password and u.get("active", True)), None)
-            return {k: v for k, v in user.items() if k != "password"} if user else None
+            user = next((u for u in DEMO_USERS if u["username"].lower() == username.lower() and u["password"] == password), None)
+            if not user:
+                return None, "invalid"
+            if not user.get("active", True):
+                return None, "inactive"
+            return {k: v for k, v in user.items() if k != "password"}, None
         users = self._request("GET", "users", params={"select": "*"})
         for row in users:
             login_name = row.get("username") or ""
@@ -111,9 +131,12 @@ class Store:
                 valid = bool(bcrypt and bcrypt.checkpw(password.encode(), stored_hash.encode())) if stored_hash.startswith("$2") else stored_hash == password_hash(password)
             except ValueError:
                 valid = False
-            if valid and row.get("active", row.get("is_active", True)):
-                return self._normalise_user(row)
-        return None
+            if not valid:
+                return None, "invalid"
+            if not resolve_active_flag(row):
+                return None, "inactive"
+            return self._normalise_user(row), None
+        return None, "invalid"
 
     def leads(self, search: str = "") -> list[dict]:
         rows = DEMO_LEADS if self.demo else self._request("GET", "leads", params={"select": "*", "order": "created_at.desc"})
@@ -121,6 +144,12 @@ class Store:
             needle = search.lower()
             rows = [row for row in rows if needle in " ".join(str(row.get(k, "")) for k in ("store_name", "block", "pic_name", "sales_id")).lower()]
         return rows
+
+    def get_lead(self, lead_id: str) -> dict | None:
+        if self.demo:
+            return next((item for item in DEMO_LEADS if item["id"] == lead_id), None)
+        rows = self._request("GET", "leads", params={"select": "*", "id": f"eq.{quote(lead_id)}", "limit": "1"})
+        return rows[0] if rows else None
 
     def routes(self) -> list[dict]:
         if self.demo:
@@ -171,6 +200,12 @@ class Store:
                 lead.update(data)
             return
         self._request("PATCH", "leads", params={"id": f"eq.{quote(lead_id)}"}, body=data)
+
+    def delete_lead(self, lead_id: str) -> None:
+        if self.demo:
+            DEMO_LEADS[:] = [item for item in DEMO_LEADS if item["id"] != lead_id]
+            return
+        self._request("DELETE", "leads", params={"id": f"eq.{quote(lead_id)}"})
 
     def save_user(self, data: dict, user_id: str | None = None) -> None:
         password = data.pop("password", "")
@@ -254,7 +289,18 @@ def normalise_role(value: str) -> str:
 
 
 def lead_form_context(**extra: Any) -> dict[str, Any]:
-    return {"couriers": EXPEDITIONS, "blocks": BLOCKS, "floors": FLOORS, "los_options": LOS_OPTIONS, "pic_positions": PIC_POSITIONS, "top_countries": TOP_COUNTRIES, "top_cities": TOP_CITIES, **extra}
+    return {
+        "couriers": EXPEDITIONS,
+        "blocks": BLOCKS,
+        "floors": FLOORS,
+        "los_options": LOS_OPTIONS,
+        "pic_positions": PIC_POSITIONS,
+        "shipment_types": SHIPMENT_TYPES,
+        "tonnage_periods": TONNAGE_PERIODS,
+        "top_countries": TOP_COUNTRIES,
+        "top_cities": TOP_CITIES,
+        **extra,
+    }
 
 
 def normalise_choice(value: str, choices: list[str], field: str, required: bool = True) -> str | None:
@@ -368,9 +414,13 @@ async def login_page(request: Request):
 @app.post("/login")
 @app.post("/auth/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    user = store.authenticate(username.strip(), password)
+    user, error_reason = store.authenticate(username.strip(), password)
     if not user:
-        return render(request, "login.html", title="Masuk", error="Username atau password tidak valid.")
+        if error_reason == "inactive":
+            message = "Akun Anda telah dinonaktifkan. Silakan hubungi Admin untuk informasi lebih lanjut."
+        else:
+            message = "Username atau password tidak valid."
+        return render(request, "login.html", title="Masuk", error=message)
     request.session["user"] = user
     return RedirectResponse("/", status_code=303)
 
@@ -408,7 +458,71 @@ async def leads_page(request: Request, search: str = "", block: str = "", floor:
     total_pages = max(1, (total + per_page - 1) // per_page)
     page = min(max(page, 1), total_pages)
     start = (page - 1) * per_page
-    return render(request, "data_entry/list.html", title="Daftar Leads", leads=filtered[start:start + per_page], search=search, block=block, floor=floor, los=los, expedition=expedition, sort_by=sort_by, page=page, per_page=per_page, total=total, total_pages=total_pages, blocks=BLOCKS, floors=FLOORS, los_options=LOS_OPTIONS, courier_options=EXPEDITIONS)
+    return render(
+        request, "data_entry/list.html", title="Daftar Leads",
+        leads=filtered[start:start + per_page], search=search, block=block, floor=floor, los=los,
+        expedition=expedition, sort_by=sort_by, page=page, per_page=per_page, total=total, total_pages=total_pages,
+        blocks=BLOCKS, floors=FLOORS, los_options=LOS_OPTIONS, courier_options=EXPEDITIONS,
+        created=request.query_params.get("created"), updated=request.query_params.get("updated"),
+        deleted=request.query_params.get("deleted"), error=request.query_params.get("error"),
+    )
+
+
+@app.get("/leads/export")
+async def export_leads_csv(request: Request, search: str = "", block: str = "", floor: str = "", los: str = "", expedition: str = "", sort_by: str = "newest"):
+    if not can(current_user(request), "admin"):
+        return RedirectResponse("/leads", status_code=303)
+
+    all_leads = store.leads(search)
+    filtered = []
+    for lead in all_leads:
+        if block and str(lead.get("block", "")) != block:
+            continue
+        if floor and str(lead.get("floor", "")) != floor:
+            continue
+        if los and str(lead.get("los", "")) != los:
+            continue
+        if expedition and expedition.lower() not in str(lead.get("current_courier", "")).lower():
+            continue
+        lead["monthly_tonnage_kg"] = monthly_tonnage(lead)
+        filtered.append(lead)
+    if sort_by == "monthly_tonnage":
+        filtered.sort(key=lambda lead: lead["monthly_tonnage_kg"], reverse=True)
+    else:
+        filtered.sort(key=lambda lead: str(lead.get("created_at") or lead.get("visit_timestamp") or ""), reverse=True)
+
+    output = io.StringIO()
+    output.write("\ufeff")  # BOM agar karakter khusus tampil benar saat dibuka di Excel
+    writer = csv.writer(output)
+    writer.writerow([
+        "Nama Toko", "Blok", "Lantai", "Los", "Nomor", "Nama PIC", "Jabatan PIC", "No HP/WA",
+        "PIC Data Entry", "Ekspedisi Saat Ini", "Jenis Kiriman", "Negara Terbanyak", "Kota Terbanyak",
+        "Tonase Potensi (KG)", "Periode Tonase", "Estimasi Tonase/Bulan (KG)", "Status Routing",
+        "Tanggal Kunjungan",
+    ])
+    for lead in filtered:
+        writer.writerow([
+            lead.get("store_name") or "",
+            lead.get("block") or "",
+            lead.get("floor") or "",
+            lead.get("los") or "",
+            lead.get("nomor") or "",
+            lead.get("pic_name") or "",
+            lead.get("pic_position") or "",
+            lead.get("phone_number") or "",
+            lead.get("data_entry_pic") or "",
+            lead.get("current_courier") or "",
+            lead.get("shipment_type") or "",
+            lead.get("top_country") or "",
+            lead.get("top_city") or "",
+            lead.get("tonnage_potential_kg") or 0,
+            lead.get("tonnage_period") or "Bulan",
+            f"{lead.get('monthly_tonnage_kg', 0):.2f}",
+            lead.get("routing_status") or "Belum diplot",
+            format_datetime(lead.get("visit_timestamp")),
+        ])
+    filename = f"daftar_leads_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={filename}"})
 
 
 @app.get("/leads/new", response_class=HTMLResponse)
@@ -498,7 +612,7 @@ async def upload_leads(request: Request, file: UploadFile = File(...)):
                 response_text = exc.response.text if exc.response is not None else ""
                 print(f"Bulk lead Supabase error pada baris {row_number}: {response_text}")
                 if "22001" in response_text:
-                    raise ValueError(f"baris {row_number}: kolom database terlalu pendek untuk pilihan multi-value. Jalankan supabase_migration_add_nomor.sql di Supabase SQL Editor") from exc
+                    raise ValueError(f"baris {row_number}: kolom database terlalu pendek untuk pilihan multi-value. Perbesar panjang kolom terkait (mis. tipe VARCHAR/text) di Supabase SQL Editor") from exc
                 raise ValueError(f"baris {row_number}: Supabase menolak data ({response_text[:240]})") from exc
     except (ValueError, TypeError, KeyError, UnicodeDecodeError) as exc:
         return RedirectResponse(f"/leads/new?error={quote(f'Upload gagal: {exc}')}", status_code=303)
@@ -511,6 +625,73 @@ async def upload_leads(request: Request, file: UploadFile = File(...)):
         print(f"Bulk lead connection error: {exc}")
         return RedirectResponse(f"/leads/new?error={quote('Tidak dapat terhubung ke Supabase saat upload.')}", status_code=303)
     return RedirectResponse(f"/leads/new?success={quote(f'{len(rows)} leads berhasil diupload')}", status_code=303)
+
+
+@app.get("/leads/{lead_id}/edit", response_class=HTMLResponse)
+async def edit_lead_form(request: Request, lead_id: str):
+    if not can(current_user(request), "data_entry", "admin"):
+        return RedirectResponse("/leads", status_code=303)
+    lead = store.get_lead(lead_id)
+    if not lead:
+        return RedirectResponse("/leads?error=Lead%20tidak%20ditemukan", status_code=303)
+    return render(
+        request, "data_entry/edit.html", title="Edit Lead", lead=lead,
+        **lead_form_context(error=request.query_params.get("error")),
+    )
+
+
+@app.post("/leads/{lead_id}/edit")
+async def update_lead_route(
+    request: Request, lead_id: str,
+    store_name: str = Form(...), block: str = Form(...), floor: str = Form(...), los: str = Form(...),
+    nomor: str = Form(...), pic_name: str = Form(...), pic_position: str = Form(...), phone_number: str = Form(...),
+    shipment_type: str = Form(...), current_courier: list[str] = Form(...), top_country: list[str] = Form(...),
+    top_city: list[str] = Form(...), tonnage_potential_kg: float = Form(0), tonnage_period: str = Form("Bulan"),
+):
+    user = current_user(request)
+    if not can(user, "data_entry", "admin"):
+        return RedirectResponse("/leads", status_code=303)
+    if not store.get_lead(lead_id):
+        return RedirectResponse("/leads?error=Lead%20tidak%20ditemukan", status_code=303)
+    try:
+        updated_data = build_lead_data(
+            user, store_name=store_name, block=block, floor=floor, los=los, nomor=nomor,
+            pic_name=pic_name, pic_position=pic_position, phone_number=phone_number,
+            shipment_type=shipment_type, current_courier=current_courier, top_country=top_country,
+            top_city=top_city, tonnage_potential_kg=tonnage_potential_kg, tonnage_period=tonnage_period,
+        )
+        # Jangan timpa jejak audit/waktu kunjungan asli & pemilik data saat proses edit
+        updated_data.pop("visit_timestamp", None)
+        updated_data.pop("created_by", None)
+        store.update_lead(lead_id, updated_data)
+    except ValueError as exc:
+        return RedirectResponse(f"/leads/{lead_id}/edit?error={quote(str(exc))}", status_code=303)
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.text:
+            print(f"Update lead Supabase error: {exc.response.text}")
+        return RedirectResponse(f"/leads/{lead_id}/edit?error={quote('Supabase menolak perubahan data.')}", status_code=303)
+    except requests.RequestException as exc:
+        print(f"Update lead connection error: {exc}")
+        return RedirectResponse(f"/leads/{lead_id}/edit?error={quote('Tidak dapat terhubung ke Supabase.')}", status_code=303)
+    return RedirectResponse("/leads?updated=1", status_code=303)
+
+
+@app.post("/leads/{lead_id}/delete")
+async def delete_lead_route(request: Request, lead_id: str):
+    if not can(current_user(request), "admin"):
+        return RedirectResponse("/leads?error=Hanya%20admin%20yang%20dapat%20menghapus%20data", status_code=303)
+    if not store.get_lead(lead_id):
+        return RedirectResponse("/leads?error=Lead%20tidak%20ditemukan", status_code=303)
+    try:
+        store.delete_lead(lead_id)
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.text:
+            print(f"Delete lead Supabase error: {exc.response.text}")
+        return RedirectResponse("/leads?error=Data%20gagal%20dihapus", status_code=303)
+    except requests.RequestException as exc:
+        print(f"Delete lead connection error: {exc}")
+        return RedirectResponse("/leads?error=Tidak%20dapat%20terhubung%20ke%20Supabase", status_code=303)
+    return RedirectResponse("/leads?deleted=1", status_code=303)
 
 
 @app.get("/routing", response_class=HTMLResponse)
@@ -638,9 +819,13 @@ async def toggle_user_status(request: Request, user_id: str = Form(...), active:
         return RedirectResponse("/users?error=Tidak%20dapat%20mengubah%20status%20akun%20sendiri", status_code=303)
     try:
         store.set_user_active(user_id, not active)
+    except requests.HTTPError as exc:
+        detail = exc.response.text[:300] if exc.response is not None and exc.response.text else str(exc)
+        print(f"Toggle user Supabase error: {detail}")
+        return RedirectResponse(f"/users?error={quote('Status user gagal diubah: ' + detail)}", status_code=303)
     except requests.RequestException as exc:
-        print(f"Toggle user error: {exc}")
-        return RedirectResponse("/users?error=Status%20user%20gagal%20diubah", status_code=303)
+        print(f"Toggle user connection error: {exc}")
+        return RedirectResponse(f"/users?error={quote('Tidak dapat terhubung ke Supabase saat mengubah status user.')}", status_code=303)
     return RedirectResponse("/users?saved=1", status_code=303)
 
 

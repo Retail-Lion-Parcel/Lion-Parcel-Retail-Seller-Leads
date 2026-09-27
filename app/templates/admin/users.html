@@ -2,6 +2,10 @@
 {% block content %}
 <h2 class="mb-4"><i class="bi bi-people text-danger me-2"></i> Kelola User</h2>
 
+{% if request.query_params.get('saved') %}<div class="alert alert-success alert-dismissible fade show"><i class="bi bi-check-circle me-1"></i> Perubahan berhasil disimpan.<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+{% if request.query_params.get('deleted') %}<div class="alert alert-success alert-dismissible fade show"><i class="bi bi-check-circle me-1"></i> User berhasil dihapus.<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+{% if request.query_params.get('error') %}<div class="alert alert-danger alert-dismissible fade show"><i class="bi bi-exclamation-triangle me-1"></i> {{ request.query_params.get('error') }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+
 <div class="card shadow-sm p-4 mb-4">
     <form method="post" action="/users" class="row g-3">
         <div class="col-md-3"><input name="name" class="form-control" placeholder="Nama lengkap" required></div>
@@ -18,7 +22,7 @@
             <thead><tr><th>Nama</th><th>Username</th><th>Role</th><th>Password Baru</th><th>Status</th><th>Aksi</th></tr></thead>
             <tbody>
             {% for item in users_list %}
-            {% set is_active = item.active if item.active is defined else true %}
+            {% set is_active = item.active if item.active is defined and item.active is not none else true %}
             {% set edit_id = 'edit-user-' ~ item.id %}
             <form id="{{ edit_id }}" method="post" action="/users"></form>
             <tr>
@@ -29,7 +33,7 @@
                 <td><span class="badge {% if is_active %}bg-success{% else %}bg-secondary{% endif %}">{% if is_active %}Aktif{% else %}Nonaktif{% endif %}</span></td>
                 <td class="d-flex gap-1 flex-wrap">
                     <button form="{{ edit_id }}" class="btn btn-sm btn-danger" type="submit">Simpan Edit</button>
-                    
+
                     {% if item.id != user.id %}
                     <form method="post" action="/users/toggle-status">
                         <input type="hidden" name="user_id" value="{{ item.id }}">
@@ -43,7 +47,7 @@
                         <button class="btn btn-sm btn-outline-danger" type="submit">Hapus</button>
                     </form>
                     {% endif %}
-                    
+
                 </td>
             </tr>
             {% else %}<tr><td colspan="6" class="text-center text-muted py-4">Belum ada user.</td></tr>{% endfor %}
