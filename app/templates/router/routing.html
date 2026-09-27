@@ -14,6 +14,12 @@
     <a href="/routing/export" class="btn btn-outline-danger"><i class="bi bi-download me-1"></i> Download Data Routing (CSV)</a>
 </div>
 
+{% if request.query_params.get('error') %}<div class="alert alert-danger py-2 mb-4">{{ request.query_params.get('error') }}</div>{% endif %}
+{% if request.query_params.get('success') %}<div class="alert alert-success py-2 mb-4">Routing berhasil disimpan ({{ request.query_params.get('success') }} lead diplot).</div>{% endif %}
+{% if request.query_params.get('target_saved') %}<div class="alert alert-success py-2 mb-4">Target routing bulanan berhasil disimpan.</div>{% endif %}
+{% if request.query_params.get('quota_saved') %}<div class="alert alert-success py-2 mb-4">Kuota visit harian sales berhasil disimpan.</div>{% endif %}
+{% if request.query_params.get('quota_deleted') %}<div class="alert alert-success py-2 mb-4">Kuota visit harian sales berhasil dihapus.</div>{% endif %}
+
 <div class="card shadow-sm p-3 mb-4 routing-summary">
     <div class="row g-3 align-items-end">
         <div class="col-md-3"><strong>Target Routing Bulanan</strong><div class="text-muted small">Tentukan target leads per bulan.</div></div>
@@ -23,13 +29,44 @@
     </div>
 </div>
 
+<div class="card shadow-sm p-3 mb-4">
+    <div class="mb-2">
+        <h5 class="mb-1"><i class="bi bi-person-check text-danger me-1"></i> Kuota Visit Harian Sales</h5>
+        <small class="text-muted">Tentukan berapa kali visit tiap sales dalam sehari beserta tanggalnya masing-masin (misal: Sales A 15 kunjungan dalam sehari). Rekomendasi jadwal di bawah mengikuti kuota ini.</small>
+    </div>
+    <form action="/routing/sales-quota" method="post" class="row g-2 align-items-end mb-3">
+        <div class="col-md-3"><label class="form-label">Sales</label><select name="sales_id" class="form-select form-select-sm" required><option value="">Pilih Sales</option>{% for s in sales_users %}<option value="{{ s.id }}">{{ s.name or s.username }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><label class="form-label">Tanggal</label><input type="date" name="quota_date" class="form-control form-control-sm" required></div>
+        <div class="col-md-3"><label class="form-label">Maks Visit / Hari</label><input type="number" name="max_visits" min="1" value="15" class="form-control form-control-sm" required></div>
+        <div class="col-md-3"><button class="btn btn-danger btn-sm w-100" type="submit"><i class="bi bi-plus-lg me-1"></i> Simpan Kuota</button></div>
+    </form>
+    {% if sales_quotas %}
+    <div class="table-responsive"><table class="table table-sm table-hover routing-table mb-0"><thead><tr><th>Sales</th><th>Tanggal</th><th>Maks Visit/Hari</th><th>Terplot</th><th>Aksi</th></tr></thead><tbody>
+    {% for q in sales_quotas %}
+    <tr><td><strong>{{ (sales_names or {}).get(q.sales_id) or q.sales_id }}</strong></td><td>{{ q.quota_date }}</td><td><strong>{{ q.max_visits }}</strong> visit/hari</td><td>{{ q.planned_count or 0 }} kunjungan diplot</td><td><form method="post" action="/routing/sales-quota/delete" onsubmit="return confirm('Hapus kuota visit ini?')"><input type="hidden" name="quota_id" value="{{ q.id }}"><button class="btn btn-sm btn-outline-danger" type="submit" title="Hapus kuota"><i class="bi bi-trash"></i></button></form></td></tr>
+    {% endfor %}
+    </tbody></table></div>
+    {% else %}
+    <div class="text-center text-muted small py-3">Belum ada kuota visit. Tambahkan kuota di atas agar sistem bisa merekomendasikan jadwal kunjungan mingguan untuk leads.</div>
+    {% endif %}
+    <div class="row g-3 mt-1">
+        <div class="col-md-4"><div class="routing-stat"><small class="text-muted">Kapasitas Visit Sales ({{ target_month }})</small><strong>{{ capacity_total }}</strong><small class="text-muted">total kunjungan/bulan dari kuota harian</small></div></div>
+        <div class="col-md-4"><div class="routing-stat"><small class="text-muted">Kebutuhan Kunjungan Leads</small><strong>{{ need_total }}</strong><small class="text-muted">sisa target kunjungan bulan ini</small></div></div>
+        <div class="col-md-4"><div class="routing-stat"><small class="text-muted">Kunjungan Terplot</small><strong>{{ planned_total }}</strong><small class="text-muted">baris jadwal visit bulan ini</small></div></div>
+    </div>
+    {% if sales_capacity_summary %}
+    <div class="mt-3 small">Rekap per sales: {% for s in sales_capacity_summary %}<span class="badge bg-light text-dark border me-1 mb-1">{{ s.name }}: maks {{ s.daily_max }} visit/hari &times; {{ s.days }} hari = {{ s.total }} kunjungan ({{ target_month }})</span>{% endfor %}</div>
+    {% endif %}
+</div>
+
 <form action="/routing/assign-bulk" method="post">
+    <input type="hidden" name="month" value="{{ target_month }}">
     <div class="card shadow-sm p-3 mb-4">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3"><div><h5 class="mb-1">Pilih Leads untuk Routing</h5><small class="text-muted">Centang satu atau beberapa lead, pilih sales dan tanggal visit pada baris masing-masing.</small></div><button class="btn btn-danger" type="submit"><i class="bi bi-calendar-plus me-1"></i> Plot Lead Terpilih</button></div>
-        <div class="table-responsive"><table class="table table-hover routing-table mb-0"><thead><tr><th>Pilih</th><th>Toko</th><th>Lokasi</th><th>International</th><th>Domestik</th><th>Tonase/Bulan</th><th>Sales</th><th>Tanggal Visit</th></tr></thead><tbody>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3"><div><h5 class="mb-1">Pilih Leads untuk Routing</h5><small class="text-muted">Centang lead, pilih sales & target kunjungan per bulan. Usulan tanggal dibuat otomatis (misal target 4 = tiap minggu sekali) sesuai kuota harian sales.</small></div><button class="btn btn-danger" type="submit"><i class="bi bi-calendar-plus me-1"></i> Plot Lead Terpilih</button></div>
+        <div class="table-responsive"><table class="table table-hover routing-table mb-0"><thead><tr><th>Pilih</th><th>Toko</th><th>Lokasi</th><th>International</th><th>Domestik</th><th>Tonase/Bulan</th><th>Sales</th><th>Target Visit/Bulan</th><th>Kunjungan Bulan Ini</th><th>Tanggal Kunjungan Pertama</th></tr></thead><tbody>
         {% for lead in leads %}{% set monthly = monthly_tonnage(lead) %}
-        <tr><td><input class="form-check-input lead-checkbox" type="checkbox" name="lead_id" value="{{ lead.id }}"></td><td><strong>{{ lead.store_name }}</strong><br><small class="text-muted">{{ lead.pic_name }} · {{ lead.phone_number }}</small></td><td>Blok {{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }}<br><small>No. {{ lead.nomor or '-' }}</small></td><td>{% if lead.shipment_type in ['International', 'Keduanya'] %}<span class="badge bg-primary">Iya</span>{% else %}<span class="text-muted">Tidak</span>{% endif %}</td><td>{% if lead.shipment_type in ['Domestik', 'Keduanya'] or not lead.shipment_type %}<span class="badge bg-success">Iya</span>{% else %}<span class="text-muted">Tidak</span>{% endif %}</td><td><strong>{{ '%.2f'|format(monthly) }} KG</strong><br><small>{{ lead.tonnage_potential_kg or 0 }} KG / {{ lead.tonnage_period or 'Bulan' }}</small></td><td><select name="sales_id_{{ lead.id }}" class="form-select form-select-sm"><option value="">Pilih Sales</option>{% for s in sales_users %}<option value="{{ s.id }}">{{ s.name or s.full_name or s.username }}</option>{% endfor %}</select></td><td><input type="date" name="scheduled_date_{{ lead.id }}" class="form-control form-control-sm"></td></tr>
-        {% else %}<tr><td colspan="8" class="text-center text-muted py-4">Belum ada leads untuk dirouting.</td></tr>{% endfor %}
+        <tr><td><input class="form-check-input lead-checkbox" type="checkbox" name="lead_id" value="{{ lead.id }}"></td><td><strong>{{ lead.store_name }}</strong><br><small class="text-muted">{{ lead.pic_name }} · {{ lead.phone_number }}</small></td><td>Blok {{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }}<br><small>No. {{ lead.nomor or '-' }}</small></td><td>{% if lead.shipment_type in ['International', 'Keduanya'] %}<span class="badge bg-primary">Iya</span>{% else %}<span class="text-muted">Tidak</span>{% endif %}</td><td>{% if lead.shipment_type in ['Domestik', 'Keduanya'] or not lead.shipment_type %}<span class="badge bg-success">Iya</span>{% else %}<span class="text-muted">Tidak</span>{% endif %}</td><td><strong>{{ '%.2f'|format(monthly) }} KG</strong><br><small>{{ lead.tonnage_potential_kg or 0 }} KG / {{ lead.tonnage_period or 'Bulan' }}</small></td><td><select name="sales_id_{{ lead.id }}" class="form-select form-select-sm"><option value="">Pilih Sales</option>{% for s in sales_users %}<option value="{{ s.id }}" {% if lead.sales_id == s.id %}selected{% endif %}>{{ s.name or s.full_name or s.username }}</option>{% endfor %}</select></td><td><input type="number" name="visit_target_{{ lead.id }}" class="form-control form-control-sm" min="0" max="31" value="{{ lead.visit_target_per_month or 1 }}"><small class="text-muted">{{ lead.frequency_label }}</small></td><td><strong>{{ lead.visits_done_this_month or 0 }}/{{ lead.visit_target_per_month or 0 }}</strong> <small class="text-muted">terplot</small><br>{% if lead.suggested_dates %}<small class="text-success">Usulan: {% for d in lead.suggested_dates %}{{ d }}{% if not loop.last %}, {% endif %}{% endfor %}</small>{% else %}<small class="text-muted">Belum ada usulan</small>{% endif %}</td><td><input type="date" name="scheduled_date_{{ lead.id }}" class="form-control form-control-sm"><small class="text-muted">Opsional — sisanya disebar mingguan</small></td></tr>
+        {% else %}<tr><td colspan="10" class="text-center text-muted py-4">Belum ada leads untuk dirouting.</td></tr>{% endfor %}
         </tbody></table></div>
         <div class="row mt-3 align-items-end"><div class="col-md-9"><label class="form-label">Catatan untuk Sales</label><input type="text" name="notes" class="form-control" placeholder="Instruksi umum untuk lead yang dipilih"></div><div class="col-md-3 text-md-end mt-2 mt-md-0"><button class="btn btn-danger" type="submit"><i class="bi bi-check2-square me-1"></i> Simpan Routing</button></div></div>
     </div>
@@ -39,7 +76,7 @@
     <div class="col-12">
         <div class="card shadow-sm p-3 mb-4">
             <h5><i class="bi bi-stars text-warning me-1"></i> Rekomendasi Prioritas Routing</h5>
-            <p class="text-muted small">Prioritas global: riwayat international dan potensi bulanan terbesar. Jika memakai lead acuan, blok/lantai/los yang sama mendapat skor tambahan.</p>
+            <p class="text-muted small">Prioritas global: riwayat international dan potensi bulanan terbesar. Jika memakai lead acuan, blok/lantai/los yang sama mendapat skor tambahan. Usulan jadwal mengikuti target kunjungan tiap lead (misal 4x/bulan = tiap minggu sekali) dan kuota visit harian sales.</p>
             
             {% if recommendations %}
             <div class="list-group">
@@ -49,6 +86,8 @@
                         <strong class="text-danger">{{ r.store_name }}</strong><br>
                         <small>Blok {{ r.block }} / Lt. {{ r.floor }} / Los {{ r.los or '-' }} · {{ '%.2f'|format(r.monthly_tonnage_kg) }} KG/bulan</small><br>
                         {% if r.has_international %}<span class="badge bg-primary">International</span>{% endif %}
+                        <small class="text-muted">Target: {{ r.visit_target_per_month or 0 }}x/bulan · {{ r.frequency_label }}</small><br>
+                        {% if r.suggested_dates %}<small class="text-success">Usulan jadwal ({{ r.visits_remaining }} kunjungan): {% for d in r.suggested_dates %}{{ d }}{% if not loop.last %}, {% endif %}{% endfor %}</small>{% else %}<small class="text-muted">Belum ada usulan jadwal (target tercapai / kuota penuh)</small>{% endif %}
                     </div>
                     <span class="badge bg-outline-primary">Plot Toko Ini</span>
                 </a>

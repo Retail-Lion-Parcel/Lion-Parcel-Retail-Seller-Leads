@@ -1,3 +1,4 @@
+import calendar
 import hashlib
 import csv
 import io
@@ -5,7 +6,9 @@ import json
 import os
 import re
 import secrets
-from datetime import datetime, timezone
+import unicodedata
+from datetime import date, datetime, timedelta, timezone
+from difflib import SequenceMatcher
 from typing import Any
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -48,6 +51,7 @@ DEMO_USERS = [
 ]
 DEMO_LEADS: list[dict[str, Any]] = []
 DEMO_ROUTING_TARGETS: dict[str, int] = {}
+DEMO_SALES_QUOTAS: list[dict[str, Any]] = []
 
 
 def now_iso() -> str:
@@ -175,6 +179,45 @@ class Store:
             self._request("PATCH", "routing_targets", params={"id": f"eq.{quote(str(existing[0]['id']))}"}, body=payload)
         else:
             self._request("POST", "routing_targets", body=payload)
+
+    def sales_quotas(self) -> list[dict]:
+        """Kuota kunjungan harian per sales (sales_visit_quotas).
+
+        Baris tabel mungkin belum ada jika migrasi skema belum dijalankan,
+        sehingga error dibalikkan menjadi list kosong agar halaman tetap tampil.
+        """
+        if self.demo:
+            return [dict(quota) for quota in DEMO_SALES_QUOTAS]
+        try:
+            return self._request("GET", "sales_visit_quotas", params={"select": "*", "order": "quota_date"})
+        except requests.HTTPError as exc:
+            print(f"Load sales_visit_quotas error (migrasi skema belum dijalankan?): {exc}")
+            return []
+
+    def save_sales_quota(self, sales_id: str, quota_date: str, max_visits: int) -> None:
+        """Simpan/ubah kuota visit harian satu sales pada satu tanggal."""
+        if self.demo:
+            for quota in DEMO_SALES_QUOTAS:
+                if quota["sales_id"] == sales_id and quota["quota_date"] == quota_date:
+                    quota["max_visits"] = max_visits
+                    return
+            DEMO_SALES_QUOTAS.append({"id": secrets.token_urlsafe(10), "sales_id": sales_id, "quota_date": quota_date, "max_visits": max_visits, "created_at": now_iso()})
+            return
+        existing = self._request("GET", "sales_visit_quotas", params={"select": "id", "sales_id": f"eq.{quote(sales_id)}", "quota_date": f"eq.{quota_date}", "limit": "1"})
+        if existing:
+            self._request("PATCH", "sales_visit_quotas", params={"id": f"eq.{quote(str(existing[0]['id']))}"}, body={"max_visits": max_visits})
+        else:
+            self._request("POST", "sales_visit_quotas", body={"sales_id": sales_id, "quota_date": quota_date, "max_visits": max_visits})
+
+    def delete_sales_quota(self, quota_id: str) -> None:
+        if self.demo:
+            DEMO_SALES_QUOTAS[:] = [quota for quota in DEMO_SALES_QUOTAS if quota["id"] != quota_id]
+            return
+        self._request("DELETE", "sales_visit_quotas", params={"id": f"eq.{quote(quota_id)}"})
+
+    def set_lead_visit_target(self, lead_id: str, visit_target: int) -> None:
+        """Simpan target frekuensi kunjungan lead (jumlah kunjungan per bulan)."""
+        self.update_lead(lead_id, {"visit_target_per_month": visit_target})
 
     def create_lead(self, data: dict) -> dict:
         if self.demo:
@@ -345,6 +388,283 @@ def has_international_history(lead: dict) -> bool:
     return shipment_type in {"international", "keduanya"} or "international" in shipment_type or "international" in str(lead.get("top_country", "")).lower()
 
 
+# ---------- Target Frekuensi Kunjungan & Kuota Harian Sales ----------
+
+def _to_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_date_safe(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def frequency_label(target: Any) -> str:
+    """Label frekuensi kunjungan dari target per bulan.
+
+    Contoh: 4 -> "4x/bulan (tiap 7 hari)" alias tiap minggu sekali.
+    """
+    count = _to_int(target, 0)
+    if count <= 0:
+        return "Belum ditentukan"
+    if count == 1:
+        return "1x/bulan"
+    interval = max(1, round(28 / count))
+    return f"{count}x/bulan (tiap {interval} hari)"
+
+
+def suggest_visit_dates(month: str, target: int, quota_dates: list[str] | None = None, start_date: str | None = None) -> list[str]:
+    """Usulan tanggal kunjungan untuk satu lead dalam sebulan.
+
+    Kunjungan disebar merata sepanjang sisa bulan — target 4 berarti
+    kira-kira tiap minggu sekali. Jika sales punya daftar tanggal kuota,
+    tanggal-tanggal tersebut diprioritaskan. start_date (jika diisi router)
+    menjadi tanggal kunjungan pertama, sisanya disebar mingguan.
+    """
+    if target <= 0:
+        return []
+    try:
+        year, mon = int(str(month)[:4]), int(str(month)[5:7])
+    except (TypeError, ValueError):
+        return []
+    days_in_month = calendar.monthrange(year, mon)[1]
+    first = date(year, mon, 1)
+    last = date(year, mon, days_in_month)
+    today = datetime.now(ZoneInfo("Asia/Jakarta")).date()
+    start = _parse_date_safe(start_date) if start_date else None
+    start = min(max(start or today, first), last)
+
+    chosen: list[date] = []
+    if start_date:
+        chosen.append(start)
+
+    remaining = target - len(chosen)
+    if remaining <= 0:
+        return [d.isoformat() for d in chosen][:target]
+
+    # 1) Prioritaskan tanggal kuota sales dalam bulan tsb (tidak sebelum tanggal mulai)
+    usable = sorted({d for d in (_parse_date_safe(q) for q in (quota_dates or [])) if d and start <= d <= last and d not in chosen})
+    if usable:
+        step = len(usable) / remaining
+        picks = {usable[min(int(i * step), len(usable) - 1)] for i in range(remaining)}
+        chosen.extend(sorted(picks - set(chosen)))
+
+    # 2) Kekurangan disebar mingguan dari tanggal mulai (dikompresi jika bulan hampir habis)
+    if len(chosen) < target:
+        span = max((last - start).days, 1)
+        need = target - len(chosen)
+        step = 7 if span >= need * 7 else max(1, span // need)
+        cursor = start
+        guard = 0
+        while len(chosen) < target and cursor <= last and guard < 128:
+            if cursor not in chosen:
+                chosen.append(cursor)
+            cursor += timedelta(days=step)
+            guard += 1
+
+    return sorted(d.isoformat() for d in chosen)[:target]
+
+
+def build_routing_plan(rows: list[dict], quotas: list[dict], routes: list[dict], month: str) -> dict[str, Any]:
+    """Hitung kapasitas sales & kebutuhan kunjungan leads untuk satu bulan.
+
+    - Kapasitas: kuota harian per sales dari tabel sales_visit_quotas
+      (misal Sales A: 15 kunjungan/hari pada tanggal-tanggal tertentu).
+    - Kebutuhan: target kunjungan/bulan tiap lead dikurangi kunjungan yang
+      sudah diplot pada bulan tersebut.
+    - Rekomendasi: usulan tanggal kunjungan per lead yang disebar tiap
+      minggu sekali dan menghormati sisa kuota harian sales.
+
+    Setiap row di-annotate in-place dengan:
+    - visit_target_per_month, frequency_label
+    - visits_done_this_month, visits_remaining
+    - suggested_dates (usulan tanggal), quota_dates (tanggal kuota sales)
+    Mengembalikan dict ringkasan: capacity_total, need_total, planned_total,
+    planned_by_key & capacity_by_key (kunci: (sales_id, "YYYY-MM-DD")).
+    """
+    quota_by_sales: dict[str, list[str]] = {}
+    capacity_by_key: dict[tuple, int] = {}
+    capacity_total = 0
+    for quota in quotas:
+        sid = quota.get("sales_id")
+        qdate = str(quota.get("quota_date") or "")[:10]
+        if not sid or not qdate or qdate[:7] != month:
+            continue
+        max_visits = _to_int(quota.get("max_visits"), 0)
+        quota_by_sales.setdefault(sid, [])
+        if qdate not in quota_by_sales[sid]:
+            quota_by_sales[sid].append(qdate)
+        key = (sid, qdate)
+        capacity_by_key[key] = capacity_by_key.get(key, 0) + max_visits
+        capacity_total += max_visits
+
+    planned_by_key: dict[tuple, int] = {}
+    planned_by_lead: dict[str, int] = {}
+    planned_total = 0
+    for route in routes:
+        sdate = str(route.get("scheduled_date") or "")[:10]
+        if sdate[:7] != month:
+            continue
+        sid = route.get("sales_id")
+        lid = route.get("lead_id")
+        key = (sid, sdate)
+        planned_by_key[key] = planned_by_key.get(key, 0) + 1
+        planned_by_lead[lid] = planned_by_lead.get(lid, 0) + 1
+        planned_total += 1
+
+    # Kebutuhan kunjungan per lead (target - yang sudah diplot bulan ini)
+    need_total = 0
+    for row in rows:
+        target = _to_int(row.get("visit_target_per_month"), 0)
+        done = planned_by_lead.get(row.get("id"), 0)
+        remaining = max(target - done, 0)
+        row["visit_target_per_month"] = target
+        row["frequency_label"] = frequency_label(target)
+        row["visits_done_this_month"] = done
+        row["visits_remaining"] = remaining
+        need_total += remaining
+
+    # Usulan tanggal diproses berurutan agar pemakaian kuota sales realistis
+    tentative: dict[tuple, int] = {}
+    for row in rows:
+        remaining = _to_int(row.get("visits_remaining"), 0)
+        sid = row.get("sales_id") or None
+        if remaining > 0:
+            # Patokan tanggal: kuota sales terkait; jika belum ada, gabungan semua kuota
+            candidates = sorted(set(quota_by_sales[sid])) if sid and quota_by_sales.get(sid) else sorted({d for ds in quota_by_sales.values() for d in ds})
+            picked: list[str] = []
+            for sdate in suggest_visit_dates(month, remaining, candidates):
+                cap = capacity_by_key.get((sid, sdate))
+                if sid and cap is None:
+                    # Sales belum punya kuota: pakai total kapasitas lintas sales pada tanggal itu
+                    cap = sum(c for (_s, d), c in capacity_by_key.items() if d == sdate) or None
+                if cap is not None:
+                    used = planned_by_key.get((sid, sdate), 0) + tentative.get((sid, sdate), 0)
+                    if used >= cap:
+                        continue  # kuota sales pada tanggal itu sudah penuh
+                picked.append(sdate)
+                tentative[(sid, sdate)] = tentative.get((sid, sdate), 0) + 1
+                if len(picked) >= remaining:
+                    break
+            row["suggested_dates"] = picked
+        else:
+            row["suggested_dates"] = []
+        row["quota_dates"] = sorted(quota_by_sales.get(sid, [])) if sid else []
+
+    return {
+        "capacity_total": capacity_total,
+        "need_total": need_total,
+        "planned_total": planned_total,
+        "planned_by_key": planned_by_key,
+        "capacity_by_key": capacity_by_key,
+    }
+
+
+# ---------- Deteksi Duplikat Leads ----------
+# Status: "Duplikat" (hampir pasti data ganda), "Kemungkinan Duplikat" (perlu dicek,
+# bisa karena typo atau beda tempat), "Perlu Dicek" (kemiripan sedang), "Unik" (aman).
+
+def _duplicate_normalise(text) -> str:
+    """Normalisasi teks untuk perbandingan: lowercase, tanpa tanda baca/spasi ganda."""
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKD", str(text)).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-z0-9]+", " ", text.lower())
+    return text.strip()
+
+
+def _duplicate_similarity(a: str, b: str) -> float:
+    """Skor kemiripan 0-1, toleran terhadap typo (difflib)."""
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _duplicate_address_key(lead: dict) -> str:
+    """Alamat toko = blok + lantai + los + nomor (dinormalisasi)."""
+    return _duplicate_normalise(" ".join(str(lead.get(k) or "") for k in ("block", "floor", "los", "nomor")))
+
+
+def _duplicate_location_text(lead: dict) -> str:
+    parts = [str(lead.get(k) or "").strip() for k in ("block", "floor", "los")]
+    return " / ".join(p for p in parts if p) or "-"
+
+
+def _duplicate_evaluate(name_sim: float, addr_sim: float, same_nomor: bool) -> tuple[str, int]:
+    """Tentukan status & persentase duplikat dari skor kemiripan nama dan alamat."""
+    # Nama & alamat sama -> hampir pasti duplikat
+    if name_sim >= 0.92 and addr_sim >= 0.92:
+        return "Duplikat", min(100, round(90 + max(name_sim, addr_sim) * 10))
+    if addr_sim >= 0.92:
+        # Alamat sama persis (blok+lantai+los+nomor sama) -> satu stall yang sama,
+        # nama beda berarti kemungkinan typo / input ulang -> tetap duplikat
+        if same_nomor:
+            if name_sim >= 0.75:
+                return "Duplikat", round(82 + name_sim * 15)
+            return "Duplikat", round(75 + name_sim * 15)
+        # Alamat mirip tapi nomor kosong/tidak persis -> perlu dicek
+        if name_sim >= 0.75:
+            return "Duplikat", round(80 + name_sim * 15)
+        return "Kemungkinan Duplikat", round(65 + addr_sim * 10)
+    # Nama sama, alamat beda -> bisa jadi beda tempat
+    if name_sim >= 0.92:
+        return "Kemungkinan Duplikat", round(55 + (name_sim - 0.92) * 60)
+    # Keduanya mirip tapi tidak identik (indikasi typo)
+    combined = 0.6 * name_sim + 0.4 * addr_sim
+    if combined >= 0.72:
+        return "Perlu Dicek", round(combined * 100)
+    return "Unik", round(combined * 100)
+
+
+def annotate_duplicates(leads: list[dict]) -> None:
+    """Annotate setiap lead dengan info duplikat terhadap lead lain (in-place).
+
+    Menambahkan key: dup_status, dup_percent, dup_match_name, dup_match_location.
+    """
+    prepared = []
+    for lead in leads:
+        prepared.append((
+            _duplicate_normalise(lead.get("store_name")),
+            _duplicate_address_key(lead),
+        ))
+
+    for i, lead in enumerate(leads):
+        name_i, addr_i = prepared[i]
+        best_status, best_percent, best_idx = "Unik", 0, None
+        for j, (name_j, addr_j) in enumerate(prepared):
+            if j == i:
+                continue
+            # Hemat komputasi: hitung kemiripan alamat hanya jika perlu
+            name_sim = _duplicate_similarity(name_i, name_j)
+            if name_sim < 0.5 and addr_i != addr_j:
+                continue
+            addr_sim = 1.0 if addr_i == addr_j else _duplicate_similarity(addr_i, addr_j)
+            if name_sim < 0.5 and addr_sim < 0.5:
+                continue
+            same_nomor = bool(str(leads[i].get("nomor") or "").strip()) and \
+                bool(str(leads[j].get("nomor") or "").strip()) and addr_i == addr_j
+            status, percent = _duplicate_evaluate(name_sim, addr_sim, same_nomor)
+            if percent > best_percent or (percent == best_percent and status == "Duplikat" and best_status != "Duplikat"):
+                best_status, best_percent, best_idx = status, percent, j
+        lead["dup_status"] = best_status
+        lead["dup_percent"] = best_percent
+        if best_idx is not None:
+            match = leads[best_idx]
+            lead["dup_match_name"] = match.get("store_name") or "-"
+            lead["dup_match_location"] = _duplicate_location_text(match)
+        else:
+            lead["dup_match_name"] = None
+            lead["dup_match_location"] = None
+
+
+
 def recommendation_score(candidate: dict, selected: dict | None = None) -> tuple[float, float]:
     score = monthly_tonnage(candidate)
     if has_international_history(candidate):
@@ -436,6 +756,7 @@ async def leads_page(request: Request, search: str = "", block: str = "", floor:
     if not current_user(request):
         return RedirectResponse("/login", status_code=303)
     all_leads = store.leads(search)
+    annotate_duplicates(all_leads)  # cek duplikat terhadap seluruh leads, bukan hanya yang tampil
     filtered = []
     for lead in all_leads:
         if block and str(lead.get("block", "")) != block:
@@ -714,13 +1035,34 @@ async def routing_page(request: Request):
         row["has_international"] = has_international_history(row)
         row["recommendation_score"] = recommendation_score(row, selected)[0]
     recommendations.sort(key=lambda row: row["recommendation_score"], reverse=True)
-    sales_users = [item for item in store.users() if item.get("role") in {"sales", "Sales"}]
+    all_users = store.users()
+    sales_users = [item for item in all_users if item.get("role") in {"sales", "Sales"}]
+    sales_names = {item.get("id"): (item.get("name") or item.get("username") or "-") for item in all_users}
     month = request.query_params.get("month") or datetime.now().strftime("%Y-%m")
+    if not re.fullmatch(r"\d{4}-\d{2}", month):
+        month = datetime.now().strftime("%Y-%m")
     routes = store.routes()
     routed_this_month = sum(1 for route in routes if str(route.get("scheduled_date", "")).startswith(month))
     routing_target = store.routing_target(month)
     routing_progress = min((routed_this_month / routing_target) * 100, 100) if routing_target else 0
-    return render(request, "router/routing.html", title="Routing Visit", groups=grouped, leads=rows, sales_users=sales_users, selected_lead=selected, recommendations=recommendations[:30], routes=routes, target_month=month, routing_target=routing_target, routed_this_month=routed_this_month, routing_progress=routing_progress, monthly_tonnage=monthly_tonnage, has_international_history=has_international_history)
+    # Kapasitas sales (kuota harian) vs kebutuhan kunjungan leads (target per lead)
+    sales_quotas = store.sales_quotas()
+    plan_stats = build_routing_plan(rows, sales_quotas, routes, month)
+    for quota in sales_quotas:
+        key = (quota.get("sales_id"), str(quota.get("quota_date") or "")[:10])
+        quota["planned_count"] = plan_stats["planned_by_key"].get(key, 0)
+    sales_capacity_summary = []
+    for sales in sales_users:
+        month_quotas = [q for q in sales_quotas if q.get("sales_id") == sales.get("id") and str(q.get("quota_date") or "")[:7] == month]
+        if not month_quotas:
+            continue
+        sales_capacity_summary.append({
+            "name": sales.get("name") or sales.get("username") or "Sales",
+            "days": len(month_quotas),
+            "daily_max": max(_to_int(q.get("max_visits"), 0) for q in month_quotas),
+            "total": sum(_to_int(q.get("max_visits"), 0) for q in month_quotas),
+        })
+    return render(request, "router/routing.html", title="Routing Visit", groups=grouped, leads=rows, sales_users=sales_users, sales_names=sales_names, selected_lead=selected, recommendations=recommendations[:30], routes=routes, target_month=month, routing_target=routing_target, routed_this_month=routed_this_month, routing_progress=routing_progress, monthly_tonnage=monthly_tonnage, has_international_history=has_international_history, sales_quotas=sales_quotas, capacity_total=plan_stats["capacity_total"], need_total=plan_stats["need_total"], planned_total=plan_stats["planned_total"], sales_capacity_summary=sales_capacity_summary, frequency_label=frequency_label)
 
 
 @app.post("/routing/target")
@@ -734,6 +1076,41 @@ async def save_routing_target(request: Request, month: str = Form(...), target_c
     return RedirectResponse(f"/routing?month={quote(month)}&target_saved=1", status_code=303)
 
 
+@app.post("/routing/sales-quota")
+async def save_sales_quota_route(request: Request, sales_id: str = Form(...), quota_date: str = Form(...), max_visits: int = Form(...)):
+    """Tetapkan kuota visit harian satu sales pada satu tanggal tertentu."""
+    user = current_user(request)
+    if not can(user, "router", "admin"):
+        return RedirectResponse("/", status_code=303)
+    if max_visits < 1:
+        return RedirectResponse("/routing?error=Kuota%20visit%20minimal%201", status_code=303)
+    if not _parse_date_safe(quota_date):
+        return RedirectResponse("/routing?error=Tanggal%20kuota%20tidak%20valid", status_code=303)
+    try:
+        store.save_sales_quota(sales_id, quota_date, max_visits)
+    except requests.HTTPError as exc:
+        detail = exc.response.text[:200] if exc.response is not None and exc.response.text else str(exc)
+        print(f"Save sales quota Supabase error: {detail}")
+        return RedirectResponse(f"/routing?error={quote('Kuota gagal disimpan: ' + detail)}", status_code=303)
+    except requests.RequestException as exc:
+        print(f"Save sales quota connection error: {exc}")
+        return RedirectResponse("/routing?error=Tidak%20dapat%20terhubung%20ke%20Supabase", status_code=303)
+    return RedirectResponse("/routing?quota_saved=1", status_code=303)
+
+
+@app.post("/routing/sales-quota/delete")
+async def delete_sales_quota_route(request: Request, quota_id: str = Form(...)):
+    user = current_user(request)
+    if not can(user, "router", "admin"):
+        return RedirectResponse("/", status_code=303)
+    try:
+        store.delete_sales_quota(quota_id)
+    except requests.RequestException as exc:
+        print(f"Delete sales quota error: {exc}")
+        return RedirectResponse("/routing?error=Kuota%20gagal%20dihapus", status_code=303)
+    return RedirectResponse("/routing?quota_deleted=1", status_code=303)
+
+
 @app.get("/sales/schedule", response_class=HTMLResponse)
 async def sales_schedule(request: Request):
     user = current_user(request)
@@ -742,7 +1119,23 @@ async def sales_schedule(request: Request):
     routes = store.routes()
     if user.get("role") == "sales":
         routes = [route for route in routes if route.get("sales_id") == user.get("id")]
-    return render(request, "sales/schedule.html", title="Jadwal Sales", routes=routes)
+    all_users = store.users()
+    sales_names = {item.get("id"): (item.get("name") or item.get("username") or "-") for item in all_users}
+    # Kuota kunjungan harian + progres pemakaian per tanggal
+    sales_quotas = store.sales_quotas()
+    if user.get("role") == "sales":
+        sales_quotas = [quota for quota in sales_quotas if quota.get("sales_id") == user.get("id")]
+    planned_map: dict[str, int] = {}
+    visited_map: dict[str, int] = {}
+    for route in routes:
+        sdate = str(route.get("scheduled_date") or "")[:10]
+        if not sdate:
+            continue
+        key = f"{route.get('sales_id')}|{sdate}"
+        planned_map[key] = planned_map.get(key, 0) + 1
+        if str(route.get("visit_status") or "") == "Visited":
+            visited_map[key] = visited_map.get(key, 0) + 1
+    return render(request, "sales/schedule.html", title="Jadwal Sales", routes=routes, sales_quotas=sales_quotas, sales_names=sales_names, frequency_label=frequency_label, planned_map=planned_map, visited_map=visited_map)
 
 
 @app.post("/sales/update-status")
@@ -769,17 +1162,47 @@ async def assign_routes_bulk(request: Request):
     if not can(user, "router", "admin"):
         return RedirectResponse("/", status_code=303)
     form = await request.form()
-    lead_ids = form.getlist("lead_id")
+    lead_ids = [str(item) for item in form.getlist("lead_id")]
     if not lead_ids:
         return RedirectResponse("/routing?error=Pilih%20minimal%20satu%20lead", status_code=303)
     notes = str(form.get("notes") or "")
+    month = str(form.get("month") or datetime.now().strftime("%Y-%m"))
     try:
+        # 1. Simpan target frekuensi kunjungan per lead & tanggal kunjungan pertama (opsional)
+        targets: dict[str, int | None] = {}
+        first_dates: dict[str, str | None] = {}
+        for lead_id in lead_ids:
+            raw_target = form.get(f"visit_target_{lead_id}")
+            targets[lead_id] = _to_int(raw_target, None) if raw_target not in (None, "") else None
+            first_dates[lead_id] = str(form.get(f"scheduled_date_{lead_id}") or "").strip() or None
+            if targets[lead_id] is not None:
+                store.set_lead_visit_target(lead_id, targets[lead_id])
+
+        # 2. Bangun ulang rencana kunjungan (kapasitas sales vs kebutuhan lead)
+        rows = store.leads()
+        build_routing_plan(rows, store.sales_quotas(), store.routes(), month)
+        plan_by_lead = {row.get("id"): row for row in rows}
+
+        # 3. Plot kunjungan: satu baris visit_routes per tanggal usulan (disebar tiap minggu)
         for lead_id in lead_ids:
             sales_id = str(form.get(f"sales_id_{lead_id}") or "")
-            scheduled_date = str(form.get(f"scheduled_date_{lead_id}") or "")
-            if not sales_id or not scheduled_date:
-                raise ValueError(f"Sales dan tanggal wajib diisi untuk lead {lead_id}")
-            store.assign_route(str(lead_id), sales_id, user["id"], scheduled_date, notes)
+            if not sales_id:
+                raise ValueError(f"Sales wajib dipilih untuk lead {lead_id}")
+            plan = plan_by_lead.get(lead_id, {})
+            target = targets.get(lead_id) if targets.get(lead_id) is not None else _to_int(plan.get("visit_target_per_month"), 1)
+            first = first_dates.get(lead_id)
+            if first and first[:7] != month:
+                raise ValueError(f"Tanggal kunjungan lead {plan.get('store_name') or lead_id} harus dalam bulan {month}")
+            quota_dates = plan.get("quota_dates") or []
+            if first:
+                dates = suggest_visit_dates(month, target, quota_dates, first)
+            else:
+                dates = list(plan.get("suggested_dates") or [])
+            if not dates:
+                raise ValueError(f"Tidak ada tanggal kunjungan yang bisa diusulkan untuk {plan.get('store_name') or lead_id} (target sudah tercapai atau kuota sales penuh)")
+            store.update_lead(lead_id, {"sales_id": sales_id, "routing_status": "Sudah diplot"})
+            for visit_date in dates:
+                store.assign_route(lead_id, sales_id, user["id"], visit_date, notes)
     except (ValueError, requests.RequestException) as exc:
         return RedirectResponse(f"/routing?error={quote(str(exc))}", status_code=303)
     return RedirectResponse(f"/routing?success={len(lead_ids)}", status_code=303)
@@ -849,7 +1272,7 @@ async def export_routing_csv(request: Request):
     routes = store.routes()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Route ID", "Tanggal Visit", "Nama Toko", "Blok", "Lantai", "Los", "Nomor", "PIC", "No HP/WA", "Sales", "Status Visit", "Catatan"])
+    writer.writerow(["Route ID", "Tanggal Visit", "Nama Toko", "Blok", "Lantai", "Los", "Nomor", "PIC", "No HP/WA", "Sales", "Status Visit", "Target Visit/Bulan (Lead)", "Frekuensi Kunjungan", "Catatan"])
     for route in routes:
         lead = route.get("leads") or {}
         sales = route.get("users") or {}
@@ -865,6 +1288,8 @@ async def export_routing_csv(request: Request):
             lead.get("phone_number") or "",
             sales.get("full_name") or sales.get("username") or route.get("sales_id") or "",
             route.get("visit_status") or "Scheduled",
+            lead.get("visit_target_per_month") or "",
+            frequency_label(lead.get("visit_target_per_month")) if lead.get("visit_target_per_month") else "",
             route.get("notes") or "",
         ])
     filename = f"data_routing_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"

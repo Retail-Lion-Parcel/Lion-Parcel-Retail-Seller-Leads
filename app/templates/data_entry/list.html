@@ -34,7 +34,7 @@
 	</div>
 </form>
 <div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
-	<thead><tr><th>Toko</th><th>Lokasi</th><th>Nomor</th><th>PIC</th><th>Ekspedisi</th><th>Shipment Type</th><th>Tonase</th><th>Estimasi / Bulan</th><th>Status</th>{% if user.role in ['data_entry', 'admin'] %}<th class="text-center">Aksi</th>{% endif %}</tr></thead>
+	<thead><tr><th>Toko</th><th>Lokasi</th><th>Nomor</th><th>PIC</th><th>Ekspedisi</th><th>Shipment Type</th><th>Tonase</th><th>Estimasi / Bulan</th><th>Status</th><th class="text-center">Duplikat</th>{% if user.role in ['data_entry', 'admin'] %}<th class="text-center">Aksi</th>{% endif %}</tr></thead>
 	<tbody>
 	{% for lead in leads %}
 	<tr>
@@ -47,6 +47,17 @@
 		<td>{{ lead.tonnage_potential_kg or 0 }} KG / {{ lead.tonnage_period or 'Bulan' }}</td>
 		<td><strong>{{ '%.2f'|format(lead.monthly_tonnage_kg or 0) }} KG</strong><br><small class="text-muted">estimasi bulanan</small></td>
 		<td><span class="badge {% if lead.routing_status == 'Sudah diplot' %}bg-success{% else %}bg-secondary{% endif %}">{{ lead.routing_status or 'Belum diplot' }}</span></td>
+		<td class="text-center">
+			{% if lead.dup_status == 'Duplikat' %}
+			<span class="badge bg-danger" title="Mirip dengan: {{ lead.dup_match_name }} ({{ lead.dup_match_location }})">{{ lead.dup_percent }}% Duplikat</span>
+			{% elif lead.dup_status == 'Kemungkinan Duplikat' %}
+			<span class="badge bg-warning text-dark" title="Mirip dengan: {{ lead.dup_match_name }} ({{ lead.dup_match_location }})">{{ lead.dup_percent }}% Kemungkinan</span>
+			{% elif lead.dup_status == 'Perlu Dicek' %}
+			<span class="badge bg-info text-dark" title="Mirip dengan: {{ lead.dup_match_name }} ({{ lead.dup_match_location }})">{{ lead.dup_percent }}% Perlu Dicek</span>
+			{% else %}
+			<span class="badge bg-success-subtle text-success border border-success-subtle" title="Tidak ditemukan kemiripan signifikan dengan lead lain">Unik</span>
+			{% endif %}
+		</td>
 		{% if user.role in ['data_entry', 'admin'] %}
 		<td class="text-nowrap text-center">
 			<a href="/leads/{{ lead.id }}/edit" class="btn btn-sm btn-outline-primary" title="Edit lead"><i class="bi bi-pencil-square"></i></a>
@@ -58,7 +69,7 @@
 		</td>
 		{% endif %}
 	</tr>
-	{% else %}<tr><td colspan="10" class="text-center text-muted py-4">Belum ada data leads sesuai filter.</td></tr>{% endfor %}
+	{% else %}<tr><td colspan="11" class="text-center text-muted py-4">Belum ada data leads sesuai filter.</td></tr>{% endfor %}
 	</tbody>
 </table></div></div>
 <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-3"><small class="text-muted">Menampilkan {{ leads|length }} dari {{ total }} data</small>{% if total_pages > 1 %}<nav aria-label="Pagination leads"><ul class="pagination pagination-sm mb-0"><li class="page-item {% if page <= 1 %}disabled{% endif %}"><a class="page-link" href="/leads?page={{ page - 1 }}&per_page={{ per_page }}&search={{ search }}&block={{ block }}&floor={{ floor }}&los={{ los }}&expedition={{ expedition }}&sort_by={{ sort_by }}">Sebelumnya</a></li>{% for number in range(1, total_pages + 1) %}<li class="page-item {% if number == page %}active{% endif %}"><a class="page-link" href="/leads?page={{ number }}&per_page={{ per_page }}&search={{ search }}&block={{ block }}&floor={{ floor }}&los={{ los }}&expedition={{ expedition }}&sort_by={{ sort_by }}">{{ number }}</a></li>{% endfor %}<li class="page-item {% if page >= total_pages %}disabled{% endif %}"><a class="page-link" href="/leads?page={{ page + 1 }}&per_page={{ per_page }}&search={{ search }}&block={{ block }}&floor={{ floor }}&los={{ los }}&expedition={{ expedition }}&sort_by={{ sort_by }}">Berikutnya</a></li></ul></nav>{% endif %}</div>
