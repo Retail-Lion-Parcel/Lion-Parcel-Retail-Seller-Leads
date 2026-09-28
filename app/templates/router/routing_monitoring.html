@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+    .mon-summary { border: 0; border-left: 4px solid #d32f2f; }
+    .mon-stat { border: 1px solid #f1d2d5; border-radius: .6rem; padding: .9rem; background: #fff8f8; height: 100%; }
+    .mon-stat strong { display: block; color: #842029; font-size: 1.5rem; }
+    .status-card { border-radius: .6rem; padding: .9rem; height: 100%; }
+    .status-card.scheduled { background: #e7f1ff; }
+    .status-card.visited { background: #e9f7ef; }
+    .status-card.rescheduled { background: #fff8e1; }
+    .status-card.canceled { background: #f1f1f1; }
+    .status-card strong { display: block; font-size: 1.4rem; }
+    .sales-row td { vertical-align: middle; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+    <h2 class="mb-0"><i class="bi bi-graph-up text-danger me-2"></i> Dashboard Monitoring Routing</h2>
+    <a href="/routing/export?month={{ target_month }}" class="btn btn-outline-danger"><i class="bi bi-download me-1"></i> Export CSV Periode Ini</a>
+</div>
+
+<div class="card shadow-sm p-3 mb-4 mon-summary">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+            <form action="/routing/monitoring" method="get">
+                <label class="form-label">Bulan Routing</label>
+                <input type="month" name="month" value="{{ target_month }}" class="form-control" onchange="this.form.submit()">
+            </form>
+        </div>
+        <div class="col-md-3">
+            <div class="mon-stat">
+                <small class="text-muted">Status Periode</small>
+                <strong>
+                    {% if period.status == 'Published' %}<span class="badge bg-success">Published</span>
+                    {% elif period.status == 'Draft' %}<span class="badge bg-warning text-dark">Draft</span>
+                    {% else %}<span class="badge bg-secondary">Belum Diatur</span>{% endif %}
+                </strong>
+            </div>
+        </div>
+        <div class="col-md-3"><div class="mon-stat"><small class="text-muted">Leads Sudah di-Route</small><strong>{{ leads_routed }} / {{ total_leads }}</strong></div></div>
+        <div class="col-md-3"><div class="mon-stat"><small class="text-muted">Basket Periode Ini</small><strong>{{ basket_total }}</strong></div></div>
+    </div>
+
+    {% if routing_target %}
+    <div class="mt-3">
+        <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>Pencapaian Target Bulanan</span>
+            <span><strong>{{ leads_routed }}</strong> / {{ routing_target }} leads</span>
+        </div>
+        <div class="progress" style="height: 10px">
+            <div class="progress-bar bg-danger target-bar" data-progress="{{ routing_progress }}"></div>
+        </div>
+    </div>
+    {% else %}
+    <small class="text-muted d-block mt-2">Target routing bulanan belum diatur untuk periode ini (atur di halaman Periode Routing).</small>
+    {% endif %}
+</div>
+
+<!-- Status kunjungan -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="status-card scheduled">
+            <small class="text-muted">Scheduled</small>
+            <strong>{{ status_counts.Scheduled }}</strong>
+            <small class="text-muted">{{ ((status_counts.Scheduled / total_visits * 100) if total_visits else 0) | round(1) }}% dari total</small>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="status-card visited">
+            <small class="text-muted">Visited (Selesai)</small>
+            <strong>{{ status_counts.Visited }}</strong>
+            <small class="text-muted">{{ ((status_counts.Visited / total_visits * 100) if total_visits else 0) | round(1) }}% dari total</small>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="status-card rescheduled">
+            <small class="text-muted">Direschedule Bulan Ini</small>
+            <strong>{{ reschedule_count }}</strong>
+            <small class="text-muted">perubahan jadwal ke bulan {{ target_month }}</small>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="status-card canceled">
+            <small class="text-muted">Canceled</small>
+            <strong>{{ status_counts.Canceled }}</strong>
+            <small class="text-muted">{{ ((status_counts.Canceled / total_visits * 100) if total_visits else 0) | round(1) }}% dari total</small>
+        </div>
+    </div>
+</div>
+
+<!-- Per sales -->
+<div class="card shadow-sm p-3 mb-4">
+    <h5 class="mb-3"><i class="bi bi-person-lines-fill text-danger me-1"></i> Capaian per Sales — {{ target_month }}</h5>
+    <div class="table-responsive">
+        <table class="table table-hover table-sm mb-0">
+            <thead><tr><th>Sales</th><th>Total Kunjungan</th><th>Selesai</th><th>Terjadwal</th><th>Batal</th><th>Completion Rate</th><th>Kapasitas</th></tr></thead>
+            <tbody>
+            {% for s in per_sales %}
+            <tr class="sales-row">
+                <td><strong>{{ s.name }}</strong></td>
+                <td>{{ s.total }}</td>
+                <td><span class="badge bg-success">{{ s.visited }}</span></td>
+                <td><span class="badge bg-primary">{{ s.scheduled }}</span></td>
+                <td><span class="badge bg-secondary">{{ s.canceled }}</span></td>
+                <td>
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="progress flex-grow-1" style="height: 8px; min-width: 80px;">
+                            <div class="progress-bar bg-success completion-bar" data-progress="{{ s.completion_rate }}"></div>
+                        </div>
+                        <small>{{ s.completion_rate }}%</small>
+                    </div>
+                </td>
+                <td><small class="text-muted">{{ s.total }} / {{ s.capacity_max }}</small></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="text-center text-muted py-4">Belum ada sales atau belum ada kunjungan terjadwal bulan ini.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+    document.querySelectorAll('.target-bar, .completion-bar').forEach((bar) => {
+        bar.style.width = `${Math.min(bar.dataset.progress, 100)}%`;
+    });
+</script>
+{% endblock %}

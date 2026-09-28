@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+    .assign-summary { border: 0; border-left: 4px solid #d32f2f; }
+    .sales-card { border: 1px solid #f1d2d5; border-radius: .6rem; padding: .75rem; background: #fff8f8; height: 100%; }
+    .sales-card strong { display: block; color: #842029; }
+    .territory-badge { font-size: .72rem; }
+    .assign-table td { vertical-align: middle; }
+    .pref-owner-tag { font-size: .7rem; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+    <h2 class="mb-0"><i class="bi bi-people-fill text-danger me-2"></i> Routing Visit — Sales Assignment</h2>
+    <div class="d-flex gap-2">
+        <a href="/routing/periods?month={{ target_month }}" class="btn btn-outline-danger"><i class="bi bi-arrow-left me-1"></i> Periode &amp; Basket</a>
+        <a href="/routing" class="btn btn-outline-danger"><i class="bi bi-calendar-plus me-1"></i> Jadwal (Legacy)</a>
+    </div>
+</div>
+
+{% if request.query_params.get('error') %}<div class="alert alert-danger py-2 mb-3">{{ request.query_params.get('error') }}</div>{% endif %}
+{% if request.query_params.get('territory_saved') %}<div class="alert alert-success py-2 mb-3">Territory berhasil disimpan.</div>{% endif %}
+{% if request.query_params.get('territory_deleted') %}<div class="alert alert-success py-2 mb-3">Territory dihapus.</div>{% endif %}
+{% if request.query_params.get('auto_assigned') %}
+<div class="alert alert-success py-2 mb-3">
+    Auto-assign selesai.
+    {% if request.query_params.get('unassigned') %}<strong>{{ request.query_params.get('unassigned') }}</strong> lead belum mendapat sales (kapasitas penuh) — sesuaikan manual di tabel bawah.{% endif %}
+</div>
+{% endif %}
+{% if request.query_params.get('assignment_saved') %}<div class="alert alert-success py-2 mb-3">{{ request.query_params.get('assignment_saved') }} perubahan manual disimpan.</div>{% endif %}
+
+<div class="card shadow-sm p-3 mb-4 assign-summary">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+            <form action="/routing/assignment" method="get">
+                <label class="form-label">Bulan Routing</label>
+                <input type="month" name="month" value="{{ target_month }}" class="form-control" onchange="this.form.submit()">
+            </form>
+        </div>
+        <div class="col-md-3"><div class="sales-card"><small class="text-muted">Kapasitas / Sales</small><strong>{{ capacity_per_sales }}</strong><small class="text-muted">kunjungan/bulan</small></div></div>
+        <div class="col-md-3"><div class="sales-card"><small class="text-muted">Leads di Basket</small><strong>{{ basket_items|length }}</strong></div></div>
+        <div class="col-md-3"><div class="sales-card"><small class="text-muted">Belum Ada Sales</small><strong class="{% if unassigned_count %}text-danger{% endif %}">{{ unassigned_count }}</strong></div></div>
+    </div>
+</div>
+
+<!-- Territory Management -->
+<div class="card shadow-sm p-3 mb-4">
+    <h5 class="mb-1"><i class="bi bi-map text-danger me-1"></i> Area Tanggung Jawab (Territory) Sales</h5>
+    <small class="text-muted d-block mb-3">Tentukan blok/lantai yang menjadi area tiap sales bulan ini. Kosongkan lantai untuk cover seluruh blok.</small>
+    <form action="/routing/territory/add" method="post" class="row g-2 align-items-end mb-3">
+        <input type="hidden" name="month" value="{{ target_month }}">
+        <div class="col-md-3"><label class="form-label">Sales</label><select name="sales_id" class="form-select form-select-sm" required><option value="">Pilih Sales</option>{% for s in sales_users %}<option value="{{ s.id }}">{{ s.name or s.username }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><label class="form-label">Blok</label><select name="block" class="form-select form-select-sm" required><option value="">Pilih Blok</option>{% for b in blocks %}<option value="{{ b }}">{{ b }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><label class="form-label">Lantai (opsional)</label><select name="floor" class="form-select form-select-sm"><option value="">Semua Lantai</option>{% for f in floors %}<option value="{{ f }}">{{ f }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><button class="btn btn-danger btn-sm w-100" type="submit"><i class="bi bi-plus-lg me-1"></i> Tambah Territory</button></div>
+    </form>
+    <div class="row g-3">
+        {% for s in sales_users %}
+        <div class="col-md-4">
+            <div class="sales-card">
+                <strong>{{ s.name or s.username }}</strong>
+                <div class="mb-2">
+                    {% for t in territories_by_sales.get(s.id, []) %}
+                    <span class="badge bg-danger-subtle text-danger border border-danger-subtle territory-badge me-1 mb-1">
+                        {{ t.block }}{% if t.floor %} / Lt {{ t.floor }}{% else %} (semua lantai){% endif %}
+                        <form action="/routing/territory/delete" method="post" class="d-inline">
+                            <input type="hidden" name="territory_id" value="{{ t.id }}">
+                            <input type="hidden" name="month" value="{{ target_month }}">
+                            <button type="submit" class="btn btn-sm p-0 border-0 bg-transparent text-danger" title="Hapus" style="font-size: .7rem;"><i class="bi bi-x-circle"></i></button>
+                        </form>
+                    </span>
+                    {% else %}
+                    <small class="text-muted">Belum ada territory.</small>
+                    {% endfor %}
+                </div>
+                <small class="text-muted">Riwayat: {% for h in sales_history.get(s.id, []) %}{{ h.month }} ({{ h.count }} lead){% if not loop.last %}, {% endif %}{% else %}belum ada riwayat{% endfor %}</small>
+            </div>
+        </div>
+        {% else %}
+        <div class="col-12 text-muted text-center py-3">Belum ada user dengan role Sales.</div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Ringkasan per sales -->
+<div class="card shadow-sm p-3 mb-4">
+    <h5 class="mb-3"><i class="bi bi-bar-chart-fill text-danger me-1"></i> Ringkasan Assignment per Sales</h5>
+    <div class="row g-3">
+        {% for s in summary %}
+        <div class="col-md-4">
+            <div class="sales-card">
+                <strong>{{ s.name }}</strong>
+                {{ s.lead_count }} leads &middot; {{ '%.2f'|format(s.tonnage) }} KG/bulan<br>
+                <small class="text-muted">Kapasitas: {{ s.used_capacity }} / {{ s.max_capacity }} kunjungan</small>
+                <div class="progress mt-1" style="height: 6px">
+                    <div class="progress-bar {% if s.used_capacity > s.max_capacity %}bg-danger{% else %}bg-success{% endif %} cap-bar" data-progress="{{ (s.used_capacity / s.max_capacity * 100) if s.max_capacity else 0 }}"></div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Auto-assign + tabel penyesuaian manual -->
+<div class="card shadow-sm p-3 mb-4">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div>
+            <h5 class="mb-1"><i class="bi bi-magic text-danger me-1"></i> Pembagian Leads</h5>
+            <small class="text-muted">Preferred Owner &rarr; Territory Match &rarr; Kapasitas Tersedia. Hasil bisa disesuaikan manual di tabel.</small>
+        </div>
+        <form action="/routing/assignment/auto" method="post">
+            <input type="hidden" name="month" value="{{ target_month }}">
+            <button class="btn btn-danger" type="submit" onclick="return confirm('Jalankan auto-assign? Assignment manual yang belum disimpan akan tertimpa.')"><i class="bi bi-magic me-1"></i> Jalankan Auto-Assign</button>
+        </form>
+    </div>
+
+    <form action="/routing/assignment" method="get" class="row g-2 align-items-end mb-3">
+        <input type="hidden" name="month" value="{{ target_month }}">
+        <div class="col-md-5"><label class="form-label">Cari (toko/PIC/blok/lantai/los)</label><input type="text" name="search" value="{{ search }}" class="form-control form-control-sm"></div>
+        <div class="col-md-4"><label class="form-label">Filter Sales</label><select name="filter_sales" class="form-select form-select-sm"><option value="">Semua</option>{% for s in sales_users %}<option value="{{ s.id }}" {% if filter_sales == s.id %}selected{% endif %}>{{ s.name or s.username }}</option>{% endfor %}</select></div>
+        <div class="col-md-3"><button class="btn btn-outline-danger btn-sm w-100" type="submit"><i class="bi bi-funnel me-1"></i> Terapkan</button></div>
+    </form>
+
+    <form action="/routing/assignment/save" method="post">
+        <input type="hidden" name="month" value="{{ target_month }}">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm assign-table mb-2">
+                <thead><tr><th>Toko</th><th>Lokasi</th><th>Target Visit</th><th>Preferred Owner</th><th>Sales</th></tr></thead>
+                <tbody>
+                {% for item in basket_items %}{% set lead = item.leads or {} %}
+                <tr>
+                    <td><strong>{{ lead.store_name }}</strong><br><small class="text-muted">{{ '%.2f'|format(item.monthly_tonnage_kg) }} KG/bulan</small></td>
+                    <td>Blok {{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }}</td>
+                    <td>{{ lead.visit_target_per_month or '-' }}x/bulan</td>
+                    <td>{% if item.preferred_owner_name %}<span class="badge bg-warning text-dark pref-owner-tag">{{ item.preferred_owner_name }}</span>{% else %}<small class="text-muted">-</small>{% endif %}</td>
+                    <td>
+                        <input type="hidden" name="original_sales_id_{{ item.id }}" value="{{ item.sales_id or '' }}">
+                        <select name="sales_id_{{ item.id }}" class="form-select form-select-sm">
+                            <option value="">Belum ada sales</option>
+                            {% for s in sales_users %}<option value="{{ s.id }}" {% if item.sales_id == s.id %}selected{% endif %}>{{ s.name or s.username }}</option>{% endfor %}
+                        </select>
+                        {% if item.is_preferred_owner %}<small class="text-success">Preferred Owner</small>{% elif item.manual_override %}<small class="text-muted">Manual</small>{% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center text-muted py-4">Basket kosong. Tambahkan leads dulu di halaman <a href="/routing/periods?month={{ target_month }}">Periode &amp; Basket</a>.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <button class="btn btn-danger" type="submit"><i class="bi bi-save me-1"></i> Simpan Perubahan Manual</button>
+    </form>
+</div>
+
+<script>
+    document.querySelectorAll('.cap-bar').forEach((bar) => {
+        bar.style.width = `${Math.min(bar.dataset.progress, 100)}%`;
+    });
+</script>
+{% endblock %}

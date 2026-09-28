@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+    .schedule-summary { border: 0; border-left: 4px solid #d32f2f; }
+    .schedule-stat { border: 1px solid #f1d2d5; border-radius: .6rem; padding: .75rem; background: #fff8f8; height: 100%; }
+    .schedule-stat strong { display: block; color: #842029; font-size: 1.25rem; }
+    .issue-block { border-radius: .5rem; padding: .75rem 1rem; margin-bottom: .5rem; }
+    .issue-block.blocking { background: #fdecea; border: 1px solid #f5c2c7; }
+    .issue-block.warning { background: #fff8e1; border: 1px solid #ffe69c; }
+    .issue-block.ok { background: #e9f7ef; border: 1px solid #b7e4c7; }
+    .view-tabs .nav-link { color: #842029; }
+    .view-tabs .nav-link.active { background: #d32f2f; color: #fff; }
+    .group-card { border: 1px solid #eee; border-radius: .6rem; padding: .75rem; margin-bottom: .75rem; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+    <h2 class="mb-0"><i class="bi bi-check2-square text-danger me-2"></i> Routing Visit — Jadwal &amp; Validasi</h2>
+    <div class="d-flex gap-2">
+        <a href="/routing/assignment?month={{ target_month }}" class="btn btn-outline-danger"><i class="bi bi-arrow-left me-1"></i> Sales Assignment</a>
+        <a href="/routing/export" class="btn btn-outline-danger"><i class="bi bi-download me-1"></i> Export CSV</a>
+    </div>
+</div>
+
+{% if request.query_params.get('error') %}<div class="alert alert-danger py-2 mb-3">{{ request.query_params.get('error') }}</div>{% endif %}
+{% if request.query_params.get('generated') %}
+<div class="alert alert-success py-2 mb-3">
+    Jadwal otomatis dibuat: <strong>{{ request.query_params.get('generated') }}</strong> kunjungan terplot.
+    {% if request.query_params.get('unscheduled') %}<strong class="text-danger">{{ request.query_params.get('unscheduled') }}</strong> lead belum dapat slot penuh (kapasitas habis) — cek panel validasi di bawah.{% endif %}
+</div>
+{% endif %}
+{% if request.query_params.get('published') %}<div class="alert alert-success py-2 mb-3"><i class="bi bi-check-circle me-1"></i> Routing berhasil di-publish! Sekarang tampil di menu Jadwal Sales.</div>{% endif %}
+
+<div class="card shadow-sm p-3 mb-4 schedule-summary">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+            <form action="/routing/schedule" method="get">
+                <label class="form-label">Bulan Routing</label>
+                <input type="month" name="month" value="{{ target_month }}" class="form-control" onchange="this.form.submit()">
+            </form>
+        </div>
+        <div class="col-md-3">
+            <div class="schedule-stat">
+                <small class="text-muted">Status Periode</small>
+                <strong>
+                    {% if period.status == 'Published' %}<span class="badge bg-success">Published</span>
+                    {% else %}<span class="badge bg-warning text-dark">Draft</span>{% endif %}
+                </strong>
+            </div>
+        </div>
+        <div class="col-md-3"><div class="schedule-stat"><small class="text-muted">Leads di Basket</small><strong>{{ basket_items|length }}</strong></div></div>
+        <div class="col-md-3"><div class="schedule-stat"><small class="text-muted">Total Kunjungan Terjadwal</small><strong>{{ total_routes }}</strong></div></div>
+    </div>
+    <div class="row g-2 mt-3">
+        <div class="col-md-6">
+            <form action="/routing/schedule/generate" method="post">
+                <input type="hidden" name="month" value="{{ target_month }}">
+                <button class="btn btn-danger w-100" type="submit" {% if period.status == 'Published' %}disabled{% endif %} onclick="return confirm('Generate ulang jadwal? Jadwal Scheduled yang belum divisit akan diganti dengan usulan baru.')">
+                    <i class="bi bi-magic me-1"></i> Generate Jadwal Otomatis
+                </button>
+            </form>
+        </div>
+        <div class="col-md-6">
+            <form action="/routing/publish" method="post">
+                <input type="hidden" name="month" value="{{ target_month }}">
+                <button class="btn btn-success w-100" type="submit" {% if has_blocking_issues or period.status == 'Published' %}disabled{% endif %} onclick="return confirm('Publish routing bulan {{ target_month }}? Setelah publish, jadwal ini tampil di menu Jadwal Sales untuk semua sales.')">
+                    <i class="bi bi-send-check me-1"></i> {% if period.status == 'Published' %}Sudah Dipublish{% else %}Publish Routing{% endif %}
+                </button>
+            </form>
+        </div>
+    </div>
+    {% if has_blocking_issues and period.status != 'Published' %}<small class="text-danger d-block mt-2">Selesaikan isu validasi (sales kosong / jadwal kurang / kapasitas terlampaui) sebelum bisa publish.</small>{% endif %}
+</div>
+
+<!-- Panel Validasi -->
+<div class="card shadow-sm p-3 mb-4">
+    <h5 class="mb-3"><i class="bi bi-clipboard2-check text-danger me-1"></i> Validasi Routing</h5>
+
+    <div class="issue-block {% if issues.leads_without_sales %}blocking{% else %}ok{% endif %}">
+        <strong>Leads Belum Ada Sales ({{ issues.leads_without_sales|length }})</strong>
+        {% if issues.leads_without_sales %}<ul class="mb-0 mt-1 small">{% for x in issues.leads_without_sales %}<li>{{ x }}</li>{% endfor %}</ul>
+        {% else %}<div class="small text-success">Semua lead di basket sudah punya sales.</div>{% endif %}
+    </div>
+
+    <div class="issue-block {% if issues.leads_without_schedule %}blocking{% else %}ok{% endif %}">
+        <strong>Jadwal Belum Memenuhi Target ({{ issues.leads_without_schedule|length }})</strong>
+        {% if issues.leads_without_schedule %}<ul class="mb-0 mt-1 small">{% for x in issues.leads_without_schedule %}<li>{{ x }}</li>{% endfor %}</ul>
+        {% else %}<div class="small text-success">Semua lead sudah terjadwal sesuai target kunjungan.</div>{% endif %}
+    </div>
+
+    <div class="issue-block {% if issues.capacity_exceeded %}blocking{% else %}ok{% endif %}">
+        <strong>Kapasitas Harian Sales Terlampaui ({{ issues.capacity_exceeded|length }})</strong>
+        {% if issues.capacity_exceeded %}<ul class="mb-0 mt-1 small">{% for x in issues.capacity_exceeded %}<li>{{ x }}</li>{% endfor %}</ul>
+        {% else %}<div class="small text-success">Tidak ada tanggal yang melebihi kapasitas maksimum sales.</div>{% endif %}
+    </div>
+
+    <div class="issue-block {% if issues.territory_mismatch %}warning{% else %}ok{% endif %} mb-0">
+        <strong>Di Luar Territory (Peringatan, tidak menghalangi publish) — {{ issues.territory_mismatch|length }}</strong>
+        {% if issues.territory_mismatch %}<ul class="mb-0 mt-1 small">{% for x in issues.territory_mismatch %}<li>{{ x }}</li>{% endfor %}</ul>
+        {% else %}<div class="small text-success">Semua assignment sesuai territory yang diatur.</div>{% endif %}
+    </div>
+</div>
+
+<!-- Preview multi-view -->
+<div class="card shadow-sm p-3 mb-4">
+    <h5 class="mb-3"><i class="bi bi-eye text-danger me-1"></i> Preview Routing</h5>
+    <ul class="nav nav-pills view-tabs mb-3">
+        <li class="nav-item"><a class="nav-link {% if view == 'sales' %}active{% endif %}" href="/routing/schedule?month={{ target_month }}&view=sales">Per Sales</a></li>
+        <li class="nav-item"><a class="nav-link {% if view == 'lead' %}active{% endif %}" href="/routing/schedule?month={{ target_month }}&view=lead">Per Lead</a></li>
+        <li class="nav-item"><a class="nav-link {% if view == 'date' %}active{% endif %}" href="/routing/schedule?month={{ target_month }}&view=date">Per Tanggal</a></li>
+        <li class="nav-item"><a class="nav-link {% if view == 'block' %}active{% endif %}" href="/routing/schedule?month={{ target_month }}&view=block">Per Blok</a></li>
+    </ul>
+
+    {% for key, routes in grouped.items() %}
+    <div class="group-card">
+        <strong class="text-danger">{{ key }}</strong> <span class="text-muted small">({{ routes|length }} kunjungan)</span>
+        <div class="table-responsive mt-2">
+            <table class="table table-sm mb-0">
+                <thead><tr><th>Tanggal</th><th>Toko</th><th>Lokasi</th><th>Sales</th><th>Status</th></tr></thead>
+                <tbody>
+                {% for r in routes|sort(attribute='scheduled_date') %}{% set lead = r.leads or {} %}
+                <tr>
+                    <td>{{ r.scheduled_date }}</td>
+                    <td>{{ lead.store_name or '-' }}</td>
+                    <td>Blok {{ lead.block }} / Lt {{ lead.floor }}</td>
+                    <td>{{ sales_names.get(r.sales_id, '-') }}</td>
+                    <td><span class="badge {% if r.visit_status == 'Visited' %}bg-success{% elif r.visit_status == 'Canceled' %}bg-secondary{% elif r.visit_status == 'Rescheduled' %}bg-warning text-dark{% else %}bg-primary{% endif %}">{{ r.visit_status or 'Scheduled' }}</span></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="text-center text-muted py-4">Belum ada jadwal. Klik "Generate Jadwal Otomatis" di atas.</div>
+    {% endfor %}
+</div>
+{% endblock %}

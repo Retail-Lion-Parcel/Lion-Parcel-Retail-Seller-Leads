@@ -1,10 +1,171 @@
 {% extends "base.html" %}
 {% block content %}
-<h2 class="mb-4"><i class="bi bi-calendar-check text-danger me-2"></i> Jadwal Sales</h2>
-<div class="card shadow-sm"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
-<thead><tr><th>Tanggal</th><th>Toko</th><th>Lokasi</th><th>Status</th><th>Aksi</th></tr></thead>
-<tbody>{% for route in routes %}{% set lead = route.leads or {} %}
-<tr><td>{{ route.scheduled_date or '-' }}</td><td><strong>{{ lead.store_name or '-' }}</strong><br><small>{{ lead.phone_number or '' }}</small></td><td>{{ lead.block or '-' }} / Lt {{ lead.floor or '-' }} / Los {{ lead.los or '-' }}</td><td>{{ route.visit_status or 'Scheduled' }}</td><td><form method="post" action="/sales/update-status" class="d-flex gap-1"><input type="hidden" name="route_id" value="{{ route.id }}"><select name="visit_status" class="form-select form-select-sm"><option>Scheduled</option><option>Visited</option><option>Rescheduled</option><option>Canceled</option></select><input type="hidden" name="notes" value=""><button class="btn btn-sm btn-danger" type="submit">Simpan</button></form></td></tr>
-{% else %}<tr><td colspan="5" class="text-center text-muted py-4">Belum ada jadwal visit.</td></tr>{% endfor %}</tbody>
-</table></div></div>
+<style>
+    .cal-tabs .nav-link { color: #842029; }
+    .cal-tabs .nav-link.active { background: #d32f2f; color: #fff; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+    .cal-day { border: 1px solid #eee; border-radius: .4rem; padding: .4rem; min-height: 110px; background: #fff; }
+    .cal-day.out-month { background: #fafafa; color: #aaa; }
+    .cal-day.today { border-color: #d32f2f; border-width: 2px; }
+    .cal-day .day-num { font-weight: 600; font-size: .85rem; }
+    .visit-chip { display: block; font-size: .68rem; padding: 2px 4px; margin-top: 2px; border-radius: 4px; background: #fdecea; color: #842029; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .visit-chip.visited { background: #e9f7ef; color: #1e7e34; }
+    .visit-chip.canceled { background: #f1f1f1; color: #666; }
+    .week-day-card { border: 1px solid #eee; border-radius: .5rem; padding: .6rem; margin-bottom: .6rem; }
+    .visit-row { border-top: 1px solid #f2f2f2; padding: .5rem 0; }
+    .visit-row:first-of-type { border-top: 0; }
+    .visit-actions form, .visit-actions details { display: inline-block; margin-right: .3rem; vertical-align: top; }
+    .visit-actions summary { list-style: none; cursor: pointer; }
+    .visit-actions summary::-webkit-details-marker { display: none; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+    <h2 class="mb-0"><i class="bi bi-calendar-check text-danger me-2"></i> Jadwal Sales</h2>
+</div>
+
+{% if request.query_params.get('error') %}<div class="alert alert-danger py-2 mb-3">{{ request.query_params.get('error') }}</div>{% endif %}
+{% if request.query_params.get('status_updated') %}<div class="alert alert-success py-2 mb-3">Status kunjungan diperbarui.</div>{% endif %}
+{% if request.query_params.get('rescheduled') %}<div class="alert alert-success py-2 mb-3">Jadwal berhasil diubah (ownership sales tidak berubah).</div>{% endif %}
+
+<ul class="nav nav-pills cal-tabs mb-3">
+    <li class="nav-item"><a class="nav-link {% if view == 'month' %}active{% endif %}" href="/sales/schedule?view=month&month={{ target_month }}&sales_id={{ sales_filter }}">Bulanan</a></li>
+    <li class="nav-item"><a class="nav-link {% if view == 'week' %}active{% endif %}" href="/sales/schedule?view=week&month={{ target_month }}&date={{ focus_date }}&sales_id={{ sales_filter }}">Mingguan</a></li>
+    <li class="nav-item"><a class="nav-link {% if view == 'day' %}active{% endif %}" href="/sales/schedule?view=day&month={{ target_month }}&date={{ focus_date }}&sales_id={{ sales_filter }}">Harian</a></li>
+    <li class="nav-item"><a class="nav-link {% if view == 'sales' %}active{% endif %}" href="/sales/schedule?view=sales&month={{ target_month }}&sales_id={{ sales_filter }}">Per Sales</a></li>
+    <li class="nav-item"><a class="nav-link {% if view == 'block' %}active{% endif %}" href="/sales/schedule?view=block&month={{ target_month }}&sales_id={{ sales_filter }}">Per Blok</a></li>
+</ul>
+
+<div class="card shadow-sm p-3 mb-4">
+    <div class="row g-2 align-items-end">
+        {% if view in ['month', 'sales', 'block'] %}
+        <div class="col-md-4">
+            <div class="btn-group w-100">
+                <a href="/sales/schedule?view={{ view }}&month={{ prev_month }}&sales_id={{ sales_filter }}" class="btn btn-outline-danger btn-sm">&laquo; {{ prev_month }}</a>
+                <span class="btn btn-danger btn-sm disabled">{{ target_month }}</span>
+                <a href="/sales/schedule?view={{ view }}&month={{ next_month }}&sales_id={{ sales_filter }}" class="btn btn-outline-danger btn-sm">{{ next_month }} &raquo;</a>
+            </div>
+        </div>
+        {% endif %}
+        {% if view in ['week', 'day'] %}
+        <div class="col-md-4">
+            <form action="/sales/schedule" method="get">
+                <input type="hidden" name="view" value="{{ view }}">
+                <input type="hidden" name="sales_id" value="{{ sales_filter }}">
+                <input type="date" name="date" value="{{ focus_date }}" class="form-control form-control-sm" onchange="this.form.submit()">
+            </form>
+        </div>
+        {% endif %}
+        {% if can_manage and sales_users %}
+        <div class="col-md-4">
+            <form action="/sales/schedule" method="get">
+                <input type="hidden" name="view" value="{{ view }}">
+                <input type="hidden" name="month" value="{{ target_month }}">
+                <input type="hidden" name="date" value="{{ focus_date }}">
+                <select name="sales_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">Semua Sales</option>
+                    {% for s in sales_users %}<option value="{{ s.id }}" {% if sales_filter == s.id %}selected{% endif %}>{{ s.name or s.username }}</option>{% endfor %}
+                </select>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% macro visit_actions(route) %}
+<div class="visit-actions mt-1">
+    <form action="/sales/update-status" method="post">
+        <input type="hidden" name="route_id" value="{{ route.id }}">
+        <input type="hidden" name="visit_status" value="Visited">
+        <button class="btn btn-sm btn-outline-success" type="submit">Selesai</button>
+    </form>
+    <form action="/sales/update-status" method="post">
+        <input type="hidden" name="route_id" value="{{ route.id }}">
+        <input type="hidden" name="visit_status" value="Canceled">
+        <button class="btn btn-sm btn-outline-secondary" type="submit" onclick="return confirm('Batalkan kunjungan ini?')">Batalkan</button>
+    </form>
+    <details>
+        <summary class="btn btn-sm btn-outline-warning">Reschedule</summary>
+        <form action="/sales/reschedule" method="post" class="d-flex flex-wrap gap-1 mt-2">
+            <input type="hidden" name="route_id" value="{{ route.id }}">
+            <input type="date" name="new_date" class="form-control form-control-sm" style="width: 150px" required>
+            <input type="text" name="reason" class="form-control form-control-sm" style="width: 180px" placeholder="Alasan reschedule" required>
+            <button class="btn btn-sm btn-danger" type="submit">Simpan</button>
+        </form>
+    </details>
+</div>
+{% endmacro %}
+
+{% if view == 'month' %}
+<div class="card shadow-sm p-3">
+    <div class="cal-grid mb-2">
+        {% for d in ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'] %}<div class="text-center small text-muted fw-bold">{{ d }}</div>{% endfor %}
+    </div>
+    {% for week in month_weeks %}
+    <div class="cal-grid mb-1">
+        {% for day in week %}
+        <a href="/sales/schedule?view=day&month={{ target_month }}&date={{ day.date }}&sales_id={{ sales_filter }}" class="text-decoration-none text-reset">
+            <div class="cal-day {% if not day.in_month %}out-month{% endif %} {% if day.is_today %}today{% endif %}">
+                <div class="day-num">{{ day.date.day }}</div>
+                {% for r in day.routes[:3] %}{% set lead = r.leads or {} %}
+                <span class="visit-chip {% if r.visit_status == 'Visited' %}visited{% elif r.visit_status == 'Canceled' %}canceled{% endif %}" title="{{ lead.store_name }} - {{ sales_names.get(r.sales_id, '-') }}">{{ lead.store_name or '-' }}</span>
+                {% endfor %}
+                {% if day.routes|length > 3 %}<small class="text-muted">+{{ day.routes|length - 3 }} lagi</small>{% endif %}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if view == 'week' %}
+{% for day in week_days %}
+<div class="week-day-card {% if day.is_today %}border-danger{% endif %}">
+    <strong>{{ day.date }}</strong>{% if day.is_today %} <span class="badge bg-danger">Hari Ini</span>{% endif %}
+    {% for r in day.routes %}{% set lead = r.leads or {} %}
+    <div class="visit-row">
+        <strong>{{ lead.store_name or '-' }}</strong> — Blok {{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }} — Sales: {{ sales_names.get(r.sales_id, '-') }}
+        <span class="badge {% if r.visit_status == 'Visited' %}bg-success{% elif r.visit_status == 'Canceled' %}bg-secondary{% else %}bg-primary{% endif %}">{{ r.visit_status or 'Scheduled' }}</span>
+        {% if can_manage %}{{ visit_actions(r) }}{% endif %}
+    </div>
+    {% else %}
+    <div class="text-muted small py-2">Tidak ada kunjungan.</div>
+    {% endfor %}
+</div>
+{% endfor %}
+{% endif %}
+
+{% if view == 'day' %}
+<div class="card shadow-sm p-3">
+    <h5 class="mb-3">{{ focus_date }}</h5>
+    {% for r in day_routes %}{% set lead = r.leads or {} %}
+    <div class="visit-row">
+        <strong>{{ lead.store_name or '-' }}</strong> — Blok {{ lead.block }} / Lt {{ lead.floor }} / Los {{ lead.los or '-' }} — Sales: {{ sales_names.get(r.sales_id, '-') }}
+        <span class="badge {% if r.visit_status == 'Visited' %}bg-success{% elif r.visit_status == 'Canceled' %}bg-secondary{% else %}bg-primary{% endif %}">{{ r.visit_status or 'Scheduled' }}</span>
+        {% if can_manage %}{{ visit_actions(r) }}{% endif %}
+    </div>
+    {% else %}
+    <div class="text-muted text-center py-4">Tidak ada kunjungan di tanggal ini.</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if view in ['sales', 'block'] %}
+<div class="card shadow-sm p-3">
+    {% for key, routes in grouped.items() %}
+    <div class="week-day-card">
+        <strong class="text-danger">{{ key }}</strong> <span class="text-muted small">({{ routes|length }} kunjungan bulan {{ target_month }})</span>
+        {% for r in routes|sort(attribute='scheduled_date') %}{% set lead = r.leads or {} %}
+        <div class="visit-row">
+            {{ r.scheduled_date }} — <strong>{{ lead.store_name or '-' }}</strong> — Blok {{ lead.block }} / Lt {{ lead.floor }}
+            <span class="badge {% if r.visit_status == 'Visited' %}bg-success{% elif r.visit_status == 'Canceled' %}bg-secondary{% else %}bg-primary{% endif %}">{{ r.visit_status or 'Scheduled' }}</span>
+            {% if can_manage %}{{ visit_actions(r) }}{% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-muted text-center py-4">Belum ada jadwal bulan ini.</div>
+    {% endfor %}
+</div>
+{% endif %}
 {% endblock %}

@@ -86,6 +86,18 @@
                         </li>
                         {% if user.role in ['router', 'admin'] %}
                         <li>
+                            <a href="/routing/periods" class="nav-link"><i class="bi bi-calendar-range me-2"></i> Periode Routing</a>
+                        </li>
+                        <li>
+                            <a href="/routing/assignment" class="nav-link"><i class="bi bi-people-fill me-2"></i> Sales Assignment</a>
+                        </li>
+                        <li>
+                            <a href="/routing/schedule" class="nav-link"><i class="bi bi-check2-square me-2"></i> Jadwal & Validasi</a>
+                        </li>
+                        <li>
+                            <a href="/routing/monitoring" class="nav-link"><i class="bi bi-graph-up me-2"></i> Dashboard Monitoring</a>
+                        </li>
+                        <li>
                             <a href="/routing" class="nav-link"><i class="bi bi-geo-alt me-2"></i> Routing Visit</a>
                         </li>
                         {% endif %}
