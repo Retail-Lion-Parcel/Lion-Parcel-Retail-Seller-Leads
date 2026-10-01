@@ -47,6 +47,8 @@ SHIPMENT_PRIORITY = {
     "Domestik": 2,
     "Tidak Sama Sekali": 1,
 }
+RECOMMENDATION_DISPLAY_LIMIT = 100   # baris yang ditampilkan di tabel rekomendasi
+TOP_N_MAX = 50000  
 ROLE_LABELS = {"data_entry": "Data Entry", "admin": "Admin", "router": "Router", "sales": "Sales"}
 ROLES = list(ROLE_LABELS)
 DEMO_USERS = [
@@ -103,6 +105,39 @@ class Store:
         response.raise_for_status()
         return response.json() if response.content else []
 
+    def _get_all(self, table: str, params: dict, page_size: int = 1000) -> list[dict]:
+        """GET semua baris dengan paginasi. Supabase/PostgREST membatasi satu
+        request maksimal 1000 baris (default), jadi tanpa ini data di atas
+        1000 baris terpotong diam-diam."""
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            chunk = self._request("GET", table, params={**params, "limit": str(page_size), "offset": str(offset)})
+            rows.extend(chunk)
+            if len(chunk) < page_size:
+                return rows
+            offset += page_size
+ 
+    def add_many_to_basket(self, period_id: str, lead_ids: list[str], user_id: str) -> int:
+        """Tambah banyak lead ke basket sekaligus (bulk insert per 500 baris,
+        bukan 2 request per lead). Lead yang sudah ada di basket dilewati.
+        Mengembalikan jumlah lead yang benar-benar baru ditambahkan."""
+        if self.demo:
+            added = 0
+            for lead_id in lead_ids:
+                if not any(i["period_id"] == period_id and i["lead_id"] == lead_id for i in DEMO_ROUTING_BASKET):
+                    DEMO_ROUTING_BASKET.append({"id": secrets.token_urlsafe(8), "period_id": period_id, "lead_id": lead_id, "added_by": user_id, "created_at": now_iso()})
+                    added += 1
+            return added
+        existing_rows = self._get_all("routing_basket_items", {"select": "lead_id", "period_id": f"eq.{quote(period_id)}", "order": "id"})
+        existing = {row["lead_id"] for row in existing_rows}
+        new_ids = [lid for lid in dict.fromkeys(lead_ids) if lid not in existing]
+        for start in range(0, len(new_ids), 500):
+            chunk = new_ids[start:start + 500]
+            self._request("POST", "routing_basket_items", body=[{"period_id": period_id, "lead_id": lid, "added_by": user_id} for lid in chunk])
+        return len(new_ids)
+ 
+
     def users(self) -> list[dict]:
         if self.demo:
             return [{**{k: v for k, v in user.items() if k != "password"}, "active": resolve_active_flag(user)} for user in DEMO_USERS]
@@ -151,7 +186,7 @@ class Store:
         return None, "invalid"
 
     def leads(self, search: str = "") -> list[dict]:
-        rows = DEMO_LEADS if self.demo else self._request("GET", "leads", params={"select": "*", "order": "created_at.desc"})
+        rows = DEMO_LEADS if self.demo else self._get_all("leads", {"select": "*", "order": "created_at.desc,id.asc"})
         if search:
             needle = search.lower()
             rows = [row for row in rows if needle in " ".join(str(row.get(k, "")) for k in ("store_name", "block", "pic_name", "sales_id")).lower()]
@@ -658,6 +693,24 @@ def lead_priority_score(lead: dict) -> tuple:
     dup_rank = {"Unik": 0, "Perlu Dicek": -1, "Kemungkinan Duplikat": -2, "Duplikat": -3}.get(lead.get("dup_status"), 0)
     has_history = 1 if lead.get("sales_id") else 0
     return (shipment_rank, tonnage, dup_rank, has_history)
+
+def filter_recommendation_leads(leads: list[dict], owner_filter: str, search: str) -> list[dict]:
+    """Filter daftar rekomendasi. 'owned' = lead yang sudah punya sales
+    (kolom leads.sales_id terisi), 'unowned' = belum punya sales.
+    Dipakai bersama oleh halaman rekomendasi dan aksi Top N supaya
+    keduanya selalu konsisten."""
+    result = leads
+    if owner_filter == "owned":
+        result = [lead for lead in result if lead.get("sales_id")]
+    elif owner_filter == "unowned":
+        result = [lead for lead in result if not lead.get("sales_id")]
+    if search:
+        needle = search.lower()
+        result = [
+            lead for lead in result
+            if needle in " ".join(str(lead.get(k) or "") for k in ("store_name", "pic_name", "block", "floor", "los")).lower()
+        ]
+    return result
 
 def preferred_owner_map(routes: list[dict]) -> dict[str, str]:
     """Map lead_id -> sales_id berdasarkan kunjungan TERAKHIR (tanggal
