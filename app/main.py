@@ -24,7 +24,7 @@ from starlette.middleware.sessions import SessionMiddleware
 try:
     import bcrypt
 except ModuleNotFoundError:
-    bcrypt = None
+    bcrypt = Non
 
 load_dotenv()
 app = FastAPI(title="Lion Parcel Retail Leads & Routing System")
@@ -136,7 +136,38 @@ class Store:
             chunk = new_ids[start:start + 500]
             self._request("POST", "routing_basket_items", body=[{"period_id": period_id, "lead_id": lid, "added_by": user_id} for lid in chunk])
         return len(new_ids)
+
+    def _get_all(self, table: str, params: dict, page_size: int = 1000) -> list[dict]:
+        """GET semua baris dengan paginasi. Supabase/PostgREST membatasi satu
+        request maksimal 1000 baris (default), jadi tanpa ini data di atas
+        1000 baris terpotong diam-diam."""
+        rows: list[dict] = []
+        offset = 0
+        while True:
+            chunk = self._request("GET", table, params={**params, "limit": str(page_size), "offset": str(offset)})
+            rows.extend(chunk)
+            if len(chunk) < page_size:
+                return rows
+            offset += page_size
  
+    def add_many_to_basket(self, period_id: str, lead_ids: list[str], user_id: str) -> int:
+        """Tambah banyak lead ke basket sekaligus (bulk insert per 500 baris,
+        bukan 2 request per lead). Lead yang sudah ada di basket dilewati.
+        Mengembalikan jumlah lead yang benar-benar baru ditambahkan."""
+        if self.demo:
+            added = 0
+            for lead_id in lead_ids:
+                if not any(i["period_id"] == period_id and i["lead_id"] == lead_id for i in DEMO_ROUTING_BASKET):
+                    DEMO_ROUTING_BASKET.append({"id": secrets.token_urlsafe(8), "period_id": period_id, "lead_id": lead_id, "added_by": user_id, "created_at": now_iso()})
+                    added += 1
+            return added
+        existing_rows = self._get_all("routing_basket_items", {"select": "lead_id", "period_id": f"eq.{quote(period_id)}", "order": "id"})
+        existing = {row["lead_id"] for row in existing_rows}
+        new_ids = [lid for lid in dict.fromkeys(lead_ids) if lid not in existing]
+        for start in range(0, len(new_ids), 500):
+            chunk = new_ids[start:start + 500]
+            self._request("POST", "routing_basket_items", body=[{"period_id": period_id, "lead_id": lid, "added_by": user_id} for lid in chunk])
+        return len(new_ids)
 
     def users(self) -> list[dict]:
         if self.demo:
@@ -204,7 +235,7 @@ class Store:
                 {"id": f"demo-route-{lead['id']}", "lead_id": lead["id"], "sales_id": lead.get("sales_id"), "scheduled_date": lead.get("visit_date"), "visit_status": "Scheduled", "notes": "", "leads": lead}
                 for lead in DEMO_LEADS if lead.get("sales_id")
             ]
-        return self._request("GET", "visit_routes", params={"select": "*,leads(*),users!visit_routes_sales_id_fkey(id,username,full_name)", "order": "scheduled_date.desc"})
+        return self._get_all("visit_routes", {"select": "*,leads(*),users!visit_routes_sales_id_fkey(id,username,full_name)", "order": "scheduled_date.desc,id.asc"})
 
     def routing_target(self, month: str) -> int:
         if self.demo:
@@ -293,7 +324,7 @@ class Store:
             for item in items:
                 item["leads"] = self.get_lead(item["lead_id"]) or {}
             return items
-        return self._request("GET", "routing_basket_items", params={"select": "*,leads(*)", "period_id": f"eq.{quote(period_id)}", "order": "created_at"})
+        return self._get_all("routing_basket_items", {"select": "*,leads(*)", "period_id": f"eq.{quote(period_id)}", "order": "created_at,id"})
  
     def add_to_basket(self, period_id: str, lead_id: str, user_id: str) -> None:
         if self.demo:
@@ -693,6 +724,24 @@ def lead_priority_score(lead: dict) -> tuple:
     dup_rank = {"Unik": 0, "Perlu Dicek": -1, "Kemungkinan Duplikat": -2, "Duplikat": -3}.get(lead.get("dup_status"), 0)
     has_history = 1 if lead.get("sales_id") else 0
     return (shipment_rank, tonnage, dup_rank, has_history)
+
+def filter_recommendation_leads(leads: list[dict], owner_filter: str, search: str) -> list[dict]:
+    """Filter daftar rekomendasi. 'owned' = lead yang sudah punya sales
+    (kolom leads.sales_id terisi), 'unowned' = belum punya sales.
+    Dipakai bersama oleh halaman rekomendasi dan aksi Top N supaya
+    keduanya selalu konsisten."""
+    result = leads
+    if owner_filter == "owned":
+        result = [lead for lead in result if lead.get("sales_id")]
+    elif owner_filter == "unowned":
+        result = [lead for lead in result if not lead.get("sales_id")]
+    if search:
+        needle = search.lower()
+        result = [
+            lead for lead in result
+            if needle in " ".join(str(lead.get(k) or "") for k in ("store_name", "pic_name", "block", "floor", "los")).lower()
+        ]
+    return result
 
 def filter_recommendation_leads(leads: list[dict], owner_filter: str, search: str) -> list[dict]:
     """Filter daftar rekomendasi. 'owned' = lead yang sudah punya sales
@@ -1643,8 +1692,6 @@ async def delete_sales_quota_route(request: Request, quota_id: str = Form(...)):
 
 @app.get("/routing/periods", response_class=HTMLResponse)
 async def routing_periods_page(request: Request):
-    """Fase 1: pilih periode, lihat info & kapasitas, atur config, pilih
-    leads ke basket berdasarkan rekomendasi prioritas."""
     user = current_user(request)
     if not can(user, "router", "admin"):
         return RedirectResponse("/", status_code=303)
@@ -1653,6 +1700,11 @@ async def routing_periods_page(request: Request):
     if not re.fullmatch(r"\d{4}-\d{2}", month):
         month = datetime.now().strftime("%Y-%m")
     year, mon = int(month[:4]), int(month[5:7])
+ 
+    owner_filter = request.query_params.get("owner_filter", "all")
+    if owner_filter not in {"all", "owned", "unowned"}:
+        owner_filter = "all"
+    search = request.query_params.get("search", "").strip()
  
     period = store.routing_period(month) or {}
     work_days_per_week = _to_int(period.get("work_days_per_week"), 6)
@@ -1669,6 +1721,7 @@ async def routing_periods_page(request: Request):
         lead["monthly_tonnage_kg"] = monthly_tonnage(lead)
         lead["has_international"] = has_international_history(lead)
  
+    sales_names = {u.get("id"): (u.get("name") or u.get("username") or "-") for u in store.users()}
     active_sales = store.active_sales_count()
     work_days = work_days_in_month(year, mon, work_days_per_week)
     capacity = compute_period_capacity(active_sales, work_days, min_per_day, max_per_day)
@@ -1681,8 +1734,15 @@ async def routing_periods_page(request: Request):
     basket_lead_ids = {item.get("lead_id") for item in basket_items}
     basket_need = sum(_to_int((item.get("leads") or {}).get("visit_target_per_month"), default_frequency) for item in basket_items)
  
-    recommendations = [lead for lead in all_leads if lead["id"] not in basket_lead_ids]
-    recommendations.sort(key=lead_priority_score, reverse=True)
+    candidates = [lead for lead in all_leads if lead["id"] not in basket_lead_ids]
+    owned_count = sum(1 for lead in candidates if lead.get("sales_id"))
+    unowned_count = len(candidates) - owned_count
+ 
+    filtered = filter_recommendation_leads(candidates, owner_filter, search)
+    filtered.sort(key=lead_priority_score, reverse=True)
+    recommendations = filtered[:RECOMMENDATION_DISPLAY_LIMIT]
+    for lead in recommendations:
+        lead["owner_name"] = sales_names.get(lead.get("sales_id")) if lead.get("sales_id") else None
  
     return render(
         request, "router/routing_period.html", title="Routing Visit — Periode & Kapasitas",
@@ -1690,7 +1750,9 @@ async def routing_periods_page(request: Request):
         period=period, work_days_per_week=work_days_per_week, min_per_day=min_per_day, max_per_day=max_per_day,
         default_frequency=default_frequency, allow_multi_week=allow_multi_week, max_per_week=max_per_week,
         period_status=period_status, active_sales=active_sales, work_days=work_days, capacity=capacity,
-        total_leads=len(all_leads), recommendations=recommendations[:50], basket_items=basket_items, basket_need=basket_need,
+        total_leads=len(all_leads), recommendations=recommendations, basket_items=basket_items, basket_need=basket_need,
+        owner_filter=owner_filter, search=search, owned_count=owned_count, unowned_count=unowned_count,
+        filtered_total=len(filtered), display_limit=RECOMMENDATION_DISPLAY_LIMIT, sales_names=sales_names,
     )
  
  
@@ -1746,7 +1808,51 @@ async def add_basket_route(request: Request, month: str = Form(...), lead_id: st
     store.add_to_basket(period["id"], lead_id, user["id"])
     return RedirectResponse(f"/routing/periods?month={quote(month)}&basket_added=1", status_code=303)
  
+
+
+def _periods_redirect(month: str, owner_filter: str, search: str, **extra: Any) -> RedirectResponse:
+    query = f"month={quote(month)}&owner_filter={quote(owner_filter)}&search={quote(search)}"
+    for key, value in extra.items():
+        query += f"&{key}={quote(str(value))}"
+    return RedirectResponse(f"/routing/periods?{query}", status_code=303)
  
+ 
+@app.post("/routing/basket/add-top")
+async def add_basket_top_route(
+    request: Request, month: str = Form(...), owner_filter: str = Form("all"), search: str = Form(""),
+    quick_n: str = Form(""), top_n: str = Form(""),
+):
+    """Masukkan N lead teratas (urut prioritas, mengikuti filter aktif) ke basket."""
+    user = current_user(request)
+    if not can(user, "router", "admin"):
+        return RedirectResponse("/", status_code=303)
+    if owner_filter not in {"all", "owned", "unowned"}:
+        owner_filter = "all"
+    search = search.strip()
+ 
+    n = _to_int(quick_n or top_n, 0)
+    if n < 1:
+        return _periods_redirect(month, owner_filter, search, error="Jumlah Top N minimal 1")
+    n = min(n, TOP_N_MAX)
+ 
+    period = _ensure_period(month, user["id"])
+    basket_lead_ids = {item.get("lead_id") for item in store.routing_basket(period["id"])}
+ 
+    all_leads = store.leads()
+    annotate_duplicates(all_leads)  # status duplikat ikut menentukan urutan prioritas
+    candidates = [lead for lead in all_leads if lead["id"] not in basket_lead_ids]
+    candidates = filter_recommendation_leads(candidates, owner_filter, search)
+    candidates.sort(key=lead_priority_score, reverse=True)
+ 
+    try:
+        added = store.add_many_to_basket(period["id"], [lead["id"] for lead in candidates[:n]], user["id"])
+    except requests.HTTPError as exc:
+        detail = exc.response.text[:200] if exc.response is not None and exc.response.text else str(exc)
+        print(f"Add top N Supabase error: {detail}")
+        return _periods_redirect(month, owner_filter, search, error=f"Gagal menambah ke basket: {detail}")
+    return _periods_redirect(month, owner_filter, search, basket_added=added)
+
+
 @app.post("/routing/basket/add-bulk")
 async def add_basket_bulk_route(request: Request):
     user = current_user(request)
@@ -1754,14 +1860,14 @@ async def add_basket_bulk_route(request: Request):
         return RedirectResponse("/", status_code=303)
     form = await request.form()
     month = str(form.get("month") or datetime.now().strftime("%Y-%m"))
+    owner_filter = str(form.get("owner_filter") or "all")
+    search = str(form.get("search") or "")
     lead_ids = [str(item) for item in form.getlist("lead_id")]
     if not lead_ids:
-        return RedirectResponse(f"/routing/periods?month={quote(month)}&error=Pilih%20minimal%20satu%20lead", status_code=303)
+        return _periods_redirect(month, owner_filter, search, error="Pilih minimal satu lead")
     period = _ensure_period(month, user["id"])
-    for lead_id in lead_ids:
-        store.add_to_basket(period["id"], lead_id, user["id"])
-    return RedirectResponse(f"/routing/periods?month={quote(month)}&basket_added={len(lead_ids)}", status_code=303)
- 
+    added = store.add_many_to_basket(period["id"], lead_ids, user["id"])
+    return _periods_redirect(month, owner_filter, search, basket_added=added) 
  
 @app.post("/routing/basket/remove")
 async def remove_basket_route(request: Request, item_id: str = Form(...), month: str = Form(...)):
