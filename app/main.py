@@ -1298,6 +1298,29 @@ def build_lead_data(user: dict, *, store_name: str, block: str, floor: str, los:
     }
 
 
+def build_lead_data_bulk(user: dict, *, store_name: str, block: str, floor: str, los: str, nomor: str, pic_name: str, pic_position: str, phone_number: str, shipment_type: str, current_courier: str | list[str], top_country: str | list[str], top_city: str | list[str], tonnage_potential_kg: float, tonnage_period: str) -> dict:
+    """Build lead data for bulk upload - allows any value for block, floor, los, nomor without validation."""
+    return {
+        "visit_timestamp": now_iso(),
+        "store_name": store_name.strip(),
+        "block": block.strip().upper() if block else "",
+        "floor": floor.strip().upper() if floor else "",
+        "los": los.strip().upper() if los else "",
+        "nomor": nomor.strip() if nomor else "-",
+        "pic_name": pic_name.strip(),
+        "pic_position": normalise_choice(pic_position, PIC_POSITIONS, "pic_position"),
+        "phone_number": normalise_phone_number(phone_number),
+        "data_entry_pic": user.get("name") or user.get("full_name") or user.get("username", ""),
+        "shipment_type": shipment_type,
+        "current_courier": selection_text(current_courier, "Ekspedisi"),
+        "top_country": selection_text(top_country, "Negara Terbanyak", required=False),
+        "top_city": selection_text(top_city, "Kota Terbanyak", required=False),
+        "tonnage_potential_kg": tonnage_potential_kg,
+        "tonnage_period": normalise_bulk_value(tonnage_period, "tonnage_period"),
+        "created_by": user["id"],
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     if not current_user(request):
@@ -1487,7 +1510,7 @@ async def upload_leads(request: Request, file: UploadFile = File(...)):
         prepared_rows = []
         for row_number, row in enumerate(rows, start=2):
             try:
-                prepared_rows.append(build_lead_data(
+                prepared_rows.append(build_lead_data_bulk(
                     user,
                     store_name=normalise_bulk_value(row.get("store_name"), "store_name"),
                     block=normalise_bulk_value(row.get("block"), "block"),
