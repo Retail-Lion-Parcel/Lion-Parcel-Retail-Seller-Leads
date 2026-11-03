@@ -1300,6 +1300,23 @@ def build_lead_data(user: dict, *, store_name: str, block: str, floor: str, los:
 
 def build_lead_data_bulk(user: dict, *, store_name: str, block: str, floor: str, los: str, nomor: str, pic_name: str, pic_position: str, phone_number: str, shipment_type: str, current_courier: str | list[str], top_country: str | list[str], top_city: str | list[str], tonnage_potential_kg: float, tonnage_period: str) -> dict:
     """Build lead data for bulk upload - allows any value for block, floor, los, nomor without validation."""
+    # Map invalid enum values to valid defaults
+    st = shipment_type.strip() if shipment_type else ""
+    if st not in SHIPMENT_TYPES:
+        st = "Domestik"
+    
+    cc = current_courier.strip() if isinstance(current_courier, str) else (", ".join(current_courier) if current_courier else "")
+    if cc not in EXPEDITIONS:
+        cc = "Tidak Ada"
+    
+    tc = top_country.strip() if isinstance(top_country, str) else (", ".join(top_country) if top_country else "")
+    if tc and tc not in TOP_COUNTRIES:
+        tc = "Lainnya"
+    
+    tcity = top_city.strip() if isinstance(top_city, str) else (", ".join(top_city) if top_city else "")
+    if tcity and tcity not in TOP_CITIES:
+        tcity = "Lainnya"
+    
     return {
         "visit_timestamp": now_iso(),
         "store_name": store_name.strip(),
@@ -1311,10 +1328,10 @@ def build_lead_data_bulk(user: dict, *, store_name: str, block: str, floor: str,
         "pic_position": normalise_choice(pic_position, PIC_POSITIONS, "pic_position"),
         "phone_number": normalise_phone_number(phone_number),
         "data_entry_pic": user.get("name") or user.get("full_name") or user.get("username", ""),
-        "shipment_type": shipment_type,
-        "current_courier": selection_text(current_courier, "Ekspedisi"),
-        "top_country": selection_text(top_country, "Negara Terbanyak", required=False),
-        "top_city": selection_text(top_city, "Kota Terbanyak", required=False),
+        "shipment_type": st,
+        "current_courier": cc,
+        "top_country": tc,
+        "top_city": tcity,
         "tonnage_potential_kg": tonnage_potential_kg,
         "tonnage_period": normalise_bulk_value(tonnage_period, "tonnage_period"),
         "created_by": user["id"],
